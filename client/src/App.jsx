@@ -1,7 +1,7 @@
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
-import { AuthProvider } from './auth/AuthContext';
+import { AuthProvider, useAuth } from './auth/AuthContext';
 import Login from './components/Login';
 
 import LandingPage from './components/LandingPage';
@@ -13,15 +13,19 @@ import PaymentSetup from './components/PaymentSetup';
 import SaasDashboard from './components/SaasDashboard';
 import SuperAdminDashboard from './components/SuperAdminDashboard';
 
+console.log("📦 [ALEX IO] App Registry Loaded");
 
 function App() {
+  console.log("🛸 [ALEX IO] App Component Rendering Started");
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log("🔄 [ALEX IO] Initializing Session Check...");
     const demoMode = localStorage.getItem('demo_mode') === 'true';
 
     if (demoMode) {
+      console.warn("🛡️ [ALEX IO] DEMO MODE ACTIVE");
       setSession({
         user: { id: 'demo-admin-id', email: 'admin@demo.com' }
       });
@@ -30,12 +34,17 @@ function App() {
     }
 
     if (!supabase) {
+      console.warn("⚠️ [ALEX IO] Supabase client is NULL or missing config");
       setLoading(false);
       return;
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log("🔑 [ALEX IO] Auth Session resolved:", !!session);
       setSession(session);
+      setLoading(false);
+    }).catch(err => {
+      console.error("❌ [ALEX IO] Auth Check Failure:", err);
       setLoading(false);
     });
 
@@ -50,7 +59,7 @@ function App() {
     return (
       <div className="min-h-screen bg-[#0f172a] flex flex-col items-center justify-center text-white p-6 font-sans">
         <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-slate-400 animate-pulse font-bold tracking-widest uppercase text-xs">Iniciando ALEX IO...</p>
+        <p className="text-slate-400 animate-pulse font-bold tracking-widest uppercase text-xs">Cargando ALEX IO...</p>
       </div>
     );
   }
