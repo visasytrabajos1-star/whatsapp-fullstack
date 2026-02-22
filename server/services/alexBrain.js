@@ -212,44 +212,46 @@ class AlexBrain {
         }
         return null;
     }
-    const res = await axios.post('https://api.openai.com/v1/chat/completions', {
-        model: "gpt-4o-mini",
-        messages: [
-            { role: "system", content: systemPrompt },
-            ...history.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content || h.text })),
-            { role: "user", content: message }
-        ]
-    }, { headers: { 'Authorization': `Bearer ${this.openaiKey}` }, timeout: 15000 });
+
+    async _tryOpenAI(message, history, systemPrompt) {
+        const res = await axios.post('https://api.openai.com/v1/chat/completions', {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: systemPrompt },
+                ...history.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content || h.text })),
+                { role: "user", content: message }
+            ]
+        }, { headers: { 'Authorization': `Bearer ${this.openaiKey}` }, timeout: 15000 });
 
         return {
-    text: res.data.choices[0].message.content,
-    tokens: res.data.usage?.total_tokens || 0
-};
+            text: res.data.choices[0].message.content,
+            tokens: res.data.usage?.total_tokens || 0
+        };
     }
 
-_generateLocalResponse(message) {
-    // Minimal logic for technical/fallback scenarios
-    if (message.toLowerCase().includes("hola")) return "Hola, soy Alex de Alex IO. ¿Cómo puedo ayudarte hoy?";
-    return "Entiendo. Estoy procesando tu consulta con mis módulos de respaldo.";
-}
+    _generateLocalResponse(message) {
+        // Minimal logic for technical/fallback scenarios
+        if (message.toLowerCase().includes("hola")) return "Hola, soy Alex de Alex IO. ¿Cómo puedo ayudarte hoy?";
+        return "Entiendo. Estoy procesando tu consulta con mis módulos de respaldo.";
+    }
 
     async _logToDatabase(conversationId, text, trace, messageType = 'text') {
-    try {
-        await supabase.from('messages').insert({
-            conversation_id: conversationId,
-            direction: 'outbound',
-            content: text,
-            message_type: messageType,
-            is_ai_generated: true,
-            ai_model: trace.model,
-            ai_tokens_used: trace.tokens,
-            processing_time_ms: trace.responseTime,
-            status: 'sent'
-        });
-    } catch (err) {
-        console.error("❌ Failed to log AI message to DB:", err.message);
+        try {
+            await supabase.from('messages').insert({
+                conversation_id: conversationId,
+                direction: 'outbound',
+                content: text,
+                message_type: messageType,
+                is_ai_generated: true,
+                ai_model: trace.model,
+                ai_tokens_used: trace.tokens,
+                processing_time_ms: trace.responseTime,
+                status: 'sent'
+            });
+        } catch (err) {
+            console.error("❌ Failed to log AI message to DB:", err.message);
+        }
     }
-}
 }
 
 module.exports = new AlexBrain();
