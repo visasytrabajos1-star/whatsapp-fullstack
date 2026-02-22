@@ -18,12 +18,17 @@ const ffmpeg = require('fluent-ffmpeg');
 const { PassThrough } = require('stream');
 // --- SERVICES ---
 const whatsappCloudAPI = require('./services/whatsappCloudAPI');
-const { generateResponse, cleanTextForTTS, detectPersonalityFromMessage, getProviderConfigStatus } = require('./services/aiRouter');
+const alexBrain = require('./services/alexBrain');
 const useSupabaseAuthState = require('./services/supabaseAuthState');
+const personas = require('./config/personas');
 
 // --- Robust Key Cleaning ---
 const cleanKey = (k) => (k || "").trim().replace(/[\r\n\t]/g, '').replace(/\s/g, '');
 const OPENAI_API_KEY = cleanKey(process.env.OPENAI_API_KEY);
+
+// --- GLOBAL CACHE (SaaS Memory) ---
+const NodeCache = require('node-cache');
+global.responseCache = global.responseCache || new NodeCache({ stdTTL: 3600, checkperiod: 600 });
 
 // --- RECONEXIÓN CONSTANTS (GLOBAL) ---
 global.MAX_RECONNECT_ATTEMPTS = 5;
@@ -45,6 +50,28 @@ app.use(express.json());
 // --- HEALTH CHECK (CRITICAL FOR RENDER) ---
 app.get('/health', (req, res) => res.status(200).send('OK'));
 app.get('/api/health', (req, res) => res.json({ status: 'ok', time: new Date() }));
+app.get('/api/diagnostics', async (req, res) => {
+    const diag = {
+        timestamp: new Date().toISOString(),
+        providers: {
+            gemini: !!(process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY),
+            openai: !!process.env.OPENAI_API_KEY,
+            deepseek: !!process.env.DEEPSEEK_API_KEY,
+            supabase: !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY),
+            elevenlabs: !!process.env.ELEVENLABS_API_KEY
+        },
+        system: {
+            memory: process.memoryUsage(),
+            uptime: process.uptime(),
+            cache_size: global.responseCache?.getStats()?.keys || 0
+        },
+        whatsapp: {
+            status: global.connectionStatus,
+            sessions: fs.existsSync('./sessions') ? fs.readdirSync('./sessions').length : 0
+        }
+    };
+    res.json(diag);
+});
 
 // --- DIRECT QR VIEW (BYPASS FRONTEND) ---
 app.get(['/qr-final', '/qr-final**'], (req, res) => {
@@ -279,31 +306,48 @@ async function processMessageAleX(userId, userText, userAudioBuffer = null) {
     }
 
     try {
-        const aiResult = await generateResponse(processedText, user.currentPersona, userId, user.chatLog);
+        const currentPersona = personas[user.currentPersona] || personas['ALEX_MIGRATION'];
+        const aiResult = await alexBrain.generateResponse({
+            message: processedText,
+            history: user.chatLog,
+            botConfig: {
+                id: user.currentPersona,
+                bot_name: currentPersona.name,
+                system_prompt: currentPersona.systemPrompt,
+            },
+            conversationId: user.dbId || userId // Use DB ID if available
+        });
+
+        // Mapping AlexBrain result to index-minimal expectations
+        const responseText = aiResult.text;
+        const trace = aiResult.trace;
 
         // Push both messages only if AI succeeded
         user.chatLog.push({ role: 'user', content: processedText });
-        user.chatLog.push({ role: 'assistant', content: aiResult.response });
+        user.chatLog.push({ role: 'assistant', content: responseText });
 
         if (user.chatLog.length > 20) user.chatLog = user.chatLog.slice(-20);
 
-        // Agregar logs de uso para el dashboard (v5.1 con métricas)
-        const m = aiResult.metrics;
-        addEventLog(`🧠 Cerebro: ${aiResult.source} | ${aiResult.tier} (${m.tokens.total} tk | $${m.cost} | ${m.responseTime}ms)`, 'SISTEMA');
+        // Agregar logs de uso para el dashboard
+        addEventLog(`🧠 Cerebro: ${trace.model} | ${trace.tier} (${trace.tokens} tk | ${trace.responseTime}ms) ${aiResult.fromCache ? '[CACHE]' : ''}`, 'SISTEMA');
 
         // Registrar en usageStats
         global.usageStats.unshift({
             id: Date.now(),
             created_at: new Date().toISOString(),
             input_text: processedText,
-            response_text: aiResult.response,
-            source: aiResult.source,
-            tier: aiResult.tier,
-            metrics: m
+            response_text: responseText,
+            source: trace.model,
+            tier: trace.tier,
+            metrics: {
+                tokens: { total: trace.tokens },
+                cost: 0, // Cost calculation deferred or simplified
+                responseTime: trace.responseTime
+            }
         });
         if (global.usageStats.length > 50) global.usageStats.pop();
 
-        return aiResult;
+        return { response: responseText, source: trace.model, tier: trace.tier, metrics: { cost: 0, responseTime: trace.responseTime } };
     } catch (e) {
         console.error('Brain Error:', e);
         return { response: "⚠️ ALEX está optimizando su conexión... dame un momento.", source: 'error', isPaid: false };
@@ -594,34 +638,47 @@ async function connectToWhatsApp() {
 
 // Routes moved to top
 
-app.post('/saas/connect', (req, res) => {
-    // 1. If QR is ready, send it immediately
-    if (global.qrCodeUrl) {
-        return res.json({ success: true, connection_type: 'QR', qr_code: global.qrCodeUrl });
-    }
+// --- SaaS ENDPOINTS (v5.2 Refactored for Polling) ---
+global.sessionStatus = global.sessionStatus || new Map();
+global.sessionQRs = global.sessionQRs || new Map();
 
-    // 2. If already connected, confirm it
-    if (global.connectionStatus === 'READY') {
-        return res.json({ success: true, message: '✅ Alex Cognitive Engine is Active.' });
-    }
+app.post(['/saas/connect', '/api/saas/connect'], async (req, res) => {
+    const { companyName, customPrompt } = req.body;
+    const instanceId = `alex_${Date.now()}`;
 
-    // 3. If connecting, tell them to wait
-    if (global.connectionStatus === 'CONNECTING') {
-        return res.json({ success: false, error: '⏳ Alex está despertando... espera el QR.' });
-    }
+    try {
+        // Init status
+        global.sessionStatus.set(instanceId, 'connecting');
 
-    // 4. Default: Start if not running
-    connectToWhatsApp();
-    res.json({ success: false, error: '🔄 Iniciando sistema... espera 10s.' });
+        // Start connection process in background (Note: this specific version uses a global sock, we might need to adjust)
+        // For simplicity in this single-tenant-turned-saas-lite version:
+        if (global.connectionStatus !== 'READY' && global.connectionStatus !== 'CONNECTING') {
+            connectToWhatsApp();
+        }
+
+        // Return immediately so frontend can start polling
+        res.json({
+            success: true,
+            message: 'Iniciando conexión...',
+            instance_id: instanceId,
+            status: 'connecting'
+        });
+    } catch (err) {
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/whatsapp/status', (req, res) => {
+app.get(['/whatsapp/status', '/api/saas/status/:instanceId'], (req, res) => {
+    // Priority: global.qrCodeUrl (Legacy) or sessionQRs
+    const qr = global.qrCodeUrl || global.sessionQRs.get(req.params.instanceId);
     res.json({
         status: global.connectionStatus,
-        qr: global.qrCodeUrl,
-        persona: global.currentPersona
+        qr: qr,
+        persona: global.currentPersona,
+        instance_id: req.params.instanceId
     });
 });
+
 
 app.post('/whatsapp/persona', (req, res) => {
     const { persona } = req.body;

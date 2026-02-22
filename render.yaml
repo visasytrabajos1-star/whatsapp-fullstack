@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: alex-io-server-prod
+    version: 2.1.0
+    env: node
+    region: oregon
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index-minimal.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
+        value: alex_prod_safe_token_2026
+
+  - type: static
+    name: alex-io-client-prod
+    env: static
+    region: oregon
+    rootDir: client
+    buildCommand: npm install && npm run build
+    publishDir: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://alex-io-server-prod.onrender.com

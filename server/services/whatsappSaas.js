@@ -15,6 +15,10 @@ if (!fs.existsSync(sessionsDir)) {
     fs.mkdirSync(sessionsDir, { recursive: true });
 }
 
+// Session Tracking for polling (v5.2)
+const sessionStatus = new Map();
+const sessionQRs = new Map();
+
 // --- 📲 QR HANDLER (MULTI-TENANT) ---
 async function handleQRMessage(sock, msg, instanceId) {
     if (!msg.message || msg.key.remoteJid === 'status@broadcast' || msg.key.fromMe) return;
@@ -108,7 +112,7 @@ async function handleCloudMessage(message) {
 }
 
 // --- 🔗 QR CONNECTION ---
-async function connectToWhatsApp(instanceId, config, res = null) {
+async function connectToWhatsApp(instanceId, config) {
     const sessionPath = `${sessionsDir}/${instanceId}`;
     clientConfigs.set(instanceId, config);
 
@@ -124,12 +128,23 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-        if (qr && res && !res.headersSent) {
+
+        if (qr) {
+            sessionStatus.set(instanceId, 'qr_ready');
             QRCode.toDataURL(qr, (err, url) => {
-                if (!err) res.json({ success: true, qr_code: url });
+                if (!err) sessionQRs.set(instanceId, url);
             });
         }
-        if (connection === 'open') console.log(`✅ Instance ${instanceId} ONLINE`);
+
+        if (connection === 'open') {
+            console.log(`✅ Instance ${instanceId} ONLINE`);
+            sessionStatus.set(instanceId, 'online');
+            sessionQRs.delete(instanceId); // Clean up QR on success
+        }
+
+        if (connection === 'close') {
+            sessionStatus.set(instanceId, 'disconnected');
+        }
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -140,10 +155,36 @@ async function connectToWhatsApp(instanceId, config, res = null) {
     });
 }
 
+// Connect WhatsApp (QR) - ASYNC CORE
 router.post('/connect', async (req, res) => {
     const { companyName, customPrompt } = req.body;
-    const instanceId = `alex_io_${Date.now()}`;
-    await connectToWhatsApp(instanceId, { companyName, customPrompt }, res);
+    const instanceId = `alex_${Date.now()}`;
+
+    try {
+        // Init status
+        sessionStatus.set(instanceId, 'connecting');
+
+        // Start connection process in background
+        connectToWhatsApp(instanceId, { companyName, customPrompt });
+
+        // Return immediately so frontend can start polling
+        res.json({
+            success: true,
+            message: 'Iniciando conexión...',
+            instance_id: instanceId,
+            status: 'connecting'
+        });
+    } catch (err) {
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+});
+
+// Polling endpoint for frontend
+router.get('/status/:instanceId', async (req, res) => {
+    const { instanceId } = req.params;
+    const status = sessionStatus.get(instanceId) || 'disconnected';
+    const qr = sessionQRs.get(instanceId) || null;
+    res.json({ instance_id: instanceId, status: status, qr_code: qr });
 });
 
 router.post('/webhook', async (req, res) => {

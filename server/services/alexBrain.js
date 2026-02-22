@@ -1,243 +1,213 @@
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
-const { chatWithDeepSeek } = require('./adapters/deepseek');
-const { speakWithGoogle } = require('./adapters/google');
 const { MIGRATION_SYSTEM_PROMPT_V1 } = require('../config/migrationPrompt');
 
-// Load Constitution at startup
-const constitutionPath = path.resolve(__dirname, '../../CONSTITUCION_ALEXANDRA.md');
-let baseConstitution = "";
+// --- CONFIGURATION ---
+const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY || process.env.GOOGLE_API_KEY;
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
+const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
+const CACHE_TTL = 3600; // 1 hour
+
+// Load Constitution
+const CONSTITUTION_PATH = path.resolve(__dirname, '../../CONSTITUCION_ALEXANDRA.md');
+let BASE_CONSTITUTION = "";
 try {
-    baseConstitution = fs.readFileSync(constitutionPath, 'utf8');
-} catch (err) {
-    console.error("❌ Failed to load CONSTITUCION_ALEXANDRA.md:", err.message);
+    BASE_CONSTITUTION = fs.readFileSync(CONSTITUTION_PATH, 'utf8');
+} catch (e) {
+    console.warn("⚠️ Constitution file not found. Using default.");
+    BASE_CONSTITUTION = "Eres ALEX IO, un asistente virtual inteligente.";
 }
 
 // Supabase Setup
 let supabase = null;
 if (process.env.SUPABASE_URL && (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY)) {
     supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY);
-} else {
-    console.warn("⚠️ Supabase credentials missing. AlexBrain will run in Limited Mode (No DB Logging).");
-    supabase = {
-        from: () => ({
-            insert: async () => ({ error: null })
-        })
-    };
 }
 
-/**
- * AlexBrain: The unified cognitive orchestrator.
- * Follows the Constitution v5.1 fallback chain and Laws of Symmetry/Transparency.
- */
+// Cache Key Generator
+const getCacheKey = (message, botId) =>
+    crypto.createHash('md5').update(`${botId}:${message}`).digest('hex');
+
 class AlexBrain {
     constructor() {
-        this.baseConstitution = baseConstitution;
-        this.geminiKey = process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY || process.env.GOOGLE_API_KEY;
-        this.openaiKey = process.env.OPENAI_API_KEY;
+        this.geminiKey = GEMINI_KEY;
+        this.openaiKey = OPENAI_KEY;
+        this.deepseekKey = DEEPSEEK_KEY;
     }
 
-    /**
-     * Generate response based on incoming message and bot configuration.
-     */
     async generateResponse(params) {
         const {
             message,
             history = [],
             botConfig = {},
             conversationId,
-            messageType = 'text' // text, audio, image, etc.
+            messageType = 'text',
+            imageBase64 = null
         } = params;
+
+        // 1. CHECK CACHE (SaaS Efficiency)
+        if (!imageBase64 && message) {
+            const cacheKey = getCacheKey(message, botConfig.id || 'default');
+            const cached = global.responseCache?.get(cacheKey);
+            if (cached) {
+                console.log('⚡ [CACHE HIT]');
+                return { ...cached, fromCache: true };
+            }
+        }
 
         const startTime = Date.now();
         let responseText = null;
         let usedModel = "none";
         let tier = "FREE";
-        let retryCount = 0;
-        let fallbackUsed = false;
         let tokensUsed = 0;
 
-        // Merge Contexts
-        const fullSystemPrompt = this._buildSystemPrompt(botConfig);
+        const fullPrompt = this._buildPrompt(botConfig);
 
-        // --- FALLBACK CHAIN (REORDERED: ChatGPT Priority) ---
+        // 2. FALLBACK CHAIN (Gemini -> DeepSeek -> OpenAI)
 
-        // 1. OPENAI GPT-4O-MINI (Primary)
-        if (this.openaiKey) {
-            try {
-                const openaiResult = await this._tryOpenAI(message, history, fullSystemPrompt);
-                if (openaiResult) {
-                    responseText = openaiResult.text;
-                    usedModel = "openai-mini";
-                    tier = "PAID";
-                    tokensUsed = openaiResult.tokens;
-                }
-            } catch (err) {
-                console.warn("⚠️ AlexBrain: OpenAI Primary Failed. Falling back to Gemini...");
-                retryCount++;
+        // --- GEMINI FLASH (PRIMARY/FREE) ---
+        try {
+            const geminiResult = await this._tryGemini(message, history, fullPrompt, imageBase64);
+            if (geminiResult) {
+                responseText = geminiResult;
+                usedModel = "gemini-1.5-flash";
             }
+        } catch (e) {
+            console.warn("⚠️ Gemini failed, trying fallbacks...");
         }
 
-        // 2. GEMINI FLASH 1.5 (Secondary)
-        if (!responseText) {
+        // --- DEEPSEEK (SECONDARY/LOW COST) ---
+        if (!responseText && this.deepseekKey && !imageBase64) {
             try {
-                const geminiResult = await this._tryGemini(message, history, fullSystemPrompt);
-                if (geminiResult) {
-                    responseText = geminiResult.text;
-                    usedModel = "gemini-1.5-flash";
-                    tier = "FREE";
-                }
-            } catch (err) {
-                console.warn("⚠️ AlexBrain: Gemini Secondary Failed. Retrying...");
-                retryCount++;
-                // RETRY (1 time)
-                try {
-                    const geminiRetry = await this._tryGemini(message, history, fullSystemPrompt);
-                    if (geminiRetry) {
-                        responseText = geminiRetry.text;
-                        usedModel = "gemini-1.5-flash";
-                        tier = "FREE";
-                    }
-                } catch (retryErr) {
-                    console.warn("⚠️ AlexBrain: Gemini Retry Failed.");
-                }
-            }
-        }
-
-        // 3. DEEPSEEK (Tertiary)
-        if (!responseText && process.env.DEEPSEEK_API_KEY) {
-            fallbackUsed = true;
-            try {
-                const deepseekResult = await chatWithDeepSeek([
-                    { role: "system", content: fullSystemPrompt },
-                    ...history,
-                    { role: "user", content: message }
-                ]);
-                if (deepseekResult) {
-                    responseText = deepseekResult.text;
+                const dsResult = await this._tryDeepSeek(message, history, fullPrompt);
+                if (dsResult) {
+                    responseText = dsResult;
                     usedModel = "deepseek-chat";
                     tier = "LOW COST";
                 }
-            } catch (err) {
-                console.warn("⚠️ AlexBrain: DeepSeek Failed.");
+            } catch (e) {
+                console.warn("⚠️ DeepSeek failed...");
             }
         }
 
-        // 4. ALEX-BRAIN (Internal/Minimal Fallback)
-        if (!responseText) {
-            fallbackUsed = true;
-            console.info("ℹ️ AlexBrain: Using local fallback logic.");
-            responseText = this._generateLocalResponse(message);
-            usedModel = "alex-brain";
-            tier = "PRO";
+        // --- OPENAI (TERTIARY/PAID) ---
+        if (!responseText && this.openaiKey && !imageBase64) {
+            try {
+                const openaiResult = await this._tryOpenAI(message, history, fullPrompt);
+                if (openaiResult) {
+                    responseText = openaiResult.text;
+                    usedModel = "gpt-4o-mini";
+                    tier = "PAID";
+                    tokensUsed = openaiResult.tokens;
+                }
+            } catch (e) {
+                console.error("❌ OpenAI failed...");
+            }
         }
 
-        // Final Safeguard (Law of Guaranteed Response)
+        // Final Safeguard
         if (!responseText) {
-            responseText = "Alex IO está procesando tu solicitud, dame un momento.";
+            responseText = "Entiendo. Estoy procesando tu consulta con mis módulos de respaldo. Por favor, intenta de nuevo en un momento.";
             usedModel = "safeguard";
         }
 
-        const responseTimeMs = Date.now() - startTime;
-
-        // Cogitive Trace Logging (Law of Transparency)
-        const trace = {
-            model: usedModel,
-            tier: tier,
-            responseTime: responseTimeMs,
-            tokens: tokensUsed,
-            retryCount,
-            fallbackUsed
-        };
-
-        // --- LAW OF SYMMETRY (AUDIO) ---
-        let audioContent = null;
-        if (messageType === 'audio' && responseText) {
-            try {
-                console.log("🎙️ Law of Symmetry: Generating Audio Response...");
-                audioContent = await speakWithGoogle(responseText, botConfig.language || 'es');
-            } catch (err) {
-                console.error("❌ Audio Symmetry Failed:", err.message);
-            }
-        }
-
-        // DB Log to messages table if conversationId is provided
-        if (conversationId) {
-            await this._logToDatabase(conversationId, responseText, trace, audioContent ? 'audio' : 'text');
-        }
-
-        return {
+        const responseTime = Date.now() - startTime;
+        const result = {
             text: responseText,
-            audio: audioContent, // Base64 encoded audio
-            trace
+            trace: {
+                model: usedModel,
+                tier,
+                responseTime,
+                fromCache: false,
+                tokens: tokensUsed,
+                hasImage: !!imageBase64
+            }
         };
+
+        // 3. SAVE TO CACHE
+        if (!imageBase64 && responseText && usedModel !== "safeguard") {
+            const cacheKey = getCacheKey(message, botConfig.id || 'default');
+            global.responseCache?.set(cacheKey, result, CACHE_TTL);
+        }
+
+        // 4. LOG TO DATABASE
+        if (conversationId && supabase) {
+            await this._logToDatabase(conversationId, responseText, result.trace, messageType);
+        }
+
+        return result;
     }
 
-    _buildSystemPrompt(config) {
-        let prompt = this.baseConstitution + "\n\n";
-        if (config.constitution) prompt += `📜 LEYES ESPECÍFICAS DEL CLIENTE:\n${config.constitution}\n\n`;
-        if (config.conversation_structure) prompt += `📐 ESTRUCTURA DE CONVERSACIÓN:\n${config.conversation_structure}\n\n`;
-        if (config.system_prompt) prompt += `👤 PERSONA:\n${config.system_prompt}\n\n`;
+    _buildPrompt(config) {
+        let prompt = `Eres ALEX IO, un asesor inteligente y profesional.\n`;
+        prompt += `${BASE_CONSTITUTION}\n\n`;
 
-        prompt += `INSTRUCCIÓN: Responde siempre como "Alex de Alex IO". Respeta las leyes de simetría y transparencia.`;
+        if (config.constitution) prompt += `📜 LEYES CLIENTE: ${config.constitution}\n`;
+        if (config.system_prompt) prompt += `👤 PERSONA: ${config.system_prompt}\n`;
+        if (config.id === 'alex_migration') prompt += `\n${MIGRATION_SYSTEM_PROMPT_V1}\n`;
+
+        prompt += `\nResponde siempre de forma amable pero profesional. Máximo 3 oraciones sugeridas.`;
         return prompt;
     }
 
-    async _tryGemini(message, history, systemPrompt) {
+    async _tryGemini(message, history, systemPrompt, imageBase64 = null) {
         if (!this.geminiKey) return null;
-
-        // Usar API oficial v1 en lugar de v1beta para mayor estabilidad
         const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${this.geminiKey}`;
 
-        const contents = [];
-        history.slice(-10).forEach(h => {
-            contents.push({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.content || h.text }] });
-        });
-        contents.push({ role: 'user', parts: [{ text: message }] });
+        const contents = history.slice(-6).map(h => ({
+            role: h.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: String(h.content || h.text || "") }]
+        }));
+
+        const parts = [];
+        if (imageBase64) parts.push({ inlineData: { mimeType: "image/jpeg", data: imageBase64 } });
+        if (message) parts.push({ text: message });
+
+        contents.push({ role: "user", parts });
 
         const payload = {
             contents,
-            systemInstruction: { parts: [{ text: systemPrompt }] }, // Cambiado a camelCase
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
         };
 
-        try {
-            const res = await axios.post(url, payload, { timeout: 15000 }); // Aumentado timeout
-            if (res.data.candidates?.[0]?.content) {
-                return { text: res.data.candidates[0].content.parts[0].text };
-            }
-        } catch (error) {
-            console.error("❌ Gemini API Error Details:", error.response?.data || error.message);
-            throw error; // Rethrow to trigger the fallback chain
-        }
-        return null;
+        const res = await axios.post(url, payload, { timeout: 12000 });
+        return res.data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+    }
+
+    async _tryDeepSeek(message, history, systemPrompt) {
+        if (!this.deepseekKey) return null;
+        const res = await axios.post('https://api.deepseek.com/chat/completions', {
+            model: "deepseek-chat",
+            messages: [
+                { role: "system", content: systemPrompt },
+                ...history.slice(-6).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content || h.text })),
+                { role: "user", content: message }
+            ]
+        }, { headers: { 'Authorization': `Bearer ${this.deepseekKey}` }, timeout: 10000 });
+        return res.data.choices[0].message.content;
     }
 
     async _tryOpenAI(message, history, systemPrompt) {
+        if (!this.openaiKey) return null;
         const res = await axios.post('https://api.openai.com/v1/chat/completions', {
             model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: systemPrompt },
-                ...history.slice(-8).map(h => ({ role: h.role === 'user' ? 'user' : 'assistant', content: h.content || h.text })),
+                ...history.slice(-6).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content || h.text })),
                 { role: "user", content: message }
             ]
-        }, { headers: { 'Authorization': `Bearer ${this.openaiKey}` }, timeout: 15000 });
-
+        }, { headers: { 'Authorization': `Bearer ${this.openaiKey}` }, timeout: 12000 });
         return {
             text: res.data.choices[0].message.content,
             tokens: res.data.usage?.total_tokens || 0
         };
     }
 
-    _generateLocalResponse(message) {
-        // Minimal logic for technical/fallback scenarios
-        if (message.toLowerCase().includes("hola")) return "Hola, soy Alex de Alex IO. ¿Cómo puedo ayudarte hoy?";
-        return "Entiendo. Estoy procesando tu consulta con mis módulos de respaldo.";
-    }
-
-    async _logToDatabase(conversationId, text, trace, messageType = 'text') {
+    async _logToDatabase(conversationId, text, trace, messageType) {
         try {
             await supabase.from('messages').insert({
                 conversation_id: conversationId,
@@ -251,7 +221,7 @@ class AlexBrain {
                 status: 'sent'
             });
         } catch (err) {
-            console.error("❌ Failed to log AI message to DB:", err.message);
+            console.error("❌ DB Log Fail:", err.message);
         }
     }
 }

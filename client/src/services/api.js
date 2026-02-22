@@ -9,8 +9,8 @@ const getBaseUrl = () => {
         if (typeof window !== 'undefined') {
             const origin = window.location.origin;
             // If we are on the specific frontend service, point to the known backend
-            if (origin.includes('crmwhatsapp-frontend')) {
-                return 'https://crmwhatsapp-1-ggpi.onrender.com';
+            if (origin.includes('whatsapp-fullstack-1')) {
+                return 'https://whatsapp-fullstack-gkm6.onrender.com';
             }
             return origin;
         }
