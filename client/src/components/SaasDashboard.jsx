@@ -330,4 +330,4 @@ function SaasDashboard() {
   );
 }
 
-export default Dashboard;
+export default SaasDashboard;
