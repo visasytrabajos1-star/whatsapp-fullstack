@@ -5,42 +5,101 @@ const pino = require('pino');
 const express = require('express');
 const router = express.Router();
 const alexBrain = require('./alexBrain');
-const supabaseClient = require('./supabaseClient');
+const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 
-// Session Management (In-Memory Fallback)
+// Session Management
 const activeSessions = new Map();
 const clientConfigs = new Map();
-const sessionStatus = new Map(); // Track: connecting, qr_ready, online, disconnected
-const sessionQRs = new Map();    // Store last QR code
+const sessionStatus = new Map();
+const reconnectAttempts = new Map();
 const sessionsDir = './sessions';
+const sessionsTable = process.env.WHATSAPP_SESSIONS_TABLE || 'whatsapp_sessions';
+const maxReconnectAttempts = Number(process.env.WHATSAPP_MAX_RECONNECT_ATTEMPTS || 8);
 
 if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
 
-// DB Persistence Helper
-async function persistStatus(instanceId, status, qr = null) {
-    sessionStatus.set(instanceId, status);
-    if (qr) sessionQRs.set(instanceId, qr);
+const updateSessionStatus = async (instanceId, status, extra = {}) => {
+    const payload = {
+        instance_id: instanceId,
+        status,
+        qr_code: extra.qr_code ?? null,
+        company_name: extra.companyName ?? null,
+        updated_at: new Date().toISOString()
+    };
 
-    const config = clientConfigs.get(instanceId) || {};
-    await supabaseClient.upsertStatus(instanceId, config.companyName || 'Bot', status, qr);
-}
+    sessionStatus.set(instanceId, {
+        status,
+        qr_code: payload.qr_code,
+        updatedAt: payload.updated_at,
+        companyName: payload.company_name
+    });
+
+    if (!isSupabaseEnabled) return;
+
+    const { error } = await supabase
+        .from(sessionsTable)
+        .upsert(payload, { onConflict: 'instance_id' });
+
+    if (error) {
+        console.warn(`⚠️ Supabase session sync failed for ${instanceId}:`, error.message);
+    }
+};
+
+const hydrateSessionStatus = async () => {
+    if (!isSupabaseEnabled) {
+        console.log('ℹ️ Supabase session persistence disabled (missing credentials).');
+        return;
+    }
+
+    const { data, error } = await supabase
+        .from(sessionsTable)
+        .select('instance_id,status,qr_code,updated_at,company_name')
+        .order('updated_at', { ascending: false })
+        .limit(200);
+
+    if (error) {
+        console.warn('⚠️ Could not hydrate session status from Supabase:', error.message);
+        return;
+    }
+
+    for (const row of data || []) {
+        sessionStatus.set(row.instance_id, {
+            status: row.status,
+            qr_code: row.qr_code,
+            updatedAt: row.updated_at,
+            companyName: row.company_name
+        });
+    }
+
+    console.log(`✅ Session status hydrated from Supabase (${(data || []).length} records).`);
+};
+
+const clearSessionRuntime = (instanceId) => {
+    activeSessions.delete(instanceId);
+    reconnectAttempts.delete(instanceId);
+};
+
+const safeDeletePersistentSession = async (instanceId) => {
+    if (!isSupabaseEnabled) return;
+
+    const { error } = await supabase.from(sessionsTable).delete().eq('instance_id', instanceId);
+    if (error) console.warn(`⚠️ Failed deleting ${instanceId} from Supabase:`, error.message);
+};
+
+hydrateSessionStatus().catch((error) => {
+    console.warn('⚠️ Session hydration bootstrap error:', error.message);
+});
 
 // --- HANDLER: QR MODE (Baileys) ---
 async function handleQRMessage(sock, msg, instanceId) {
     if (!msg.message || msg.key.remoteJid === 'status@broadcast' || msg.key.fromMe) return;
 
-    // Detectar tipo de mensaje
     const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption;
-    const hasImage = !!(msg.message.imageMessage || msg.message.image || msg.message.videoMessage);
+    const hasImage = !!(msg.message.imageMessage || msg.message.image);
 
-    // Si es solo imagen/video sin texto, responder que no se puede procesar
     if (hasImage && !text) {
         const remoteJid = msg.key.remoteJid;
-        try {
-            await sock.sendMessage(remoteJid, { text: "¡Hola! Soy Alex. Lamentablemente, en este momento no puedo ver imágenes ni videos. ¿Podrías describirme con palabras lo que necesitas? Así podré ayudarte mejor 😊" });
-        } catch (e) {
-            console.error('Error sending message:', e.message);
-        }
+        await sock.sendMessage(remoteJid, { text: '¡Hola! Soy Alex. Lamentablemente, en este momento no puedo ver imágenes. ¿Podrías describirme con palabras lo que necesitas? Así podré ayudarte mejor 😊' });
         return;
     }
 
@@ -53,7 +112,6 @@ async function handleQRMessage(sock, msg, instanceId) {
         await sock.readMessages([msg.key]);
         await sock.sendPresenceUpdate('composing', remoteJid);
 
-        // Generate AI Response
         const result = await alexBrain.generateResponse({
             message: text,
             history: [],
@@ -88,30 +146,61 @@ async function connectToWhatsApp(instanceId, config, res = null) {
         keepAliveIntervalMs: 10000
     });
 
+    const previous = activeSessions.get(instanceId);
+    if (previous && previous !== sock) {
+        try { previous.end?.(); } catch (_) { }
+    }
+
     activeSessions.set(instanceId, sock);
-    persistStatus(instanceId, 'connecting');
+    await updateSessionStatus(instanceId, 'connecting', { companyName: config.companyName });
+    console.log(`🔄 [${instanceId}] Connecting for ${config.companyName || 'ALEX IO'}...`);
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         if (qr) {
-            persistStatus(instanceId, 'qr_ready', qr);
-            if (res && !res.headersSent) {
-                QRCode.toDataURL(qr, (err, url) => {
-                    if (!err) res.json({ success: true, qr_code: url, instance_id: instanceId, status: 'qr_ready' });
+            QRCode.toDataURL(qr)
+                .then(async (url) => {
+                    await updateSessionStatus(instanceId, 'qr_ready', {
+                        companyName: config.companyName,
+                        qr_code: url
+                    });
+
+                    console.log(`📲 [${instanceId}] QR generated.`);
+
+                    if (res && !res.headersSent) {
+                        res.json({ success: true, qr_code: url, instance_id: instanceId });
+                    }
+                })
+                .catch((error) => {
+                    console.error(`❌ [${instanceId}] QR conversion failed:`, error.message);
                 });
-            }
         }
 
         if (connection === 'close') {
-            const statusCode = lastDisconnect?.error?.output?.statusCode;
-            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-            persistStatus(instanceId, statusCode === DisconnectReason.loggedOut ? 'disconnected' : 'connecting');
-            if (shouldReconnect) setTimeout(() => connectToWhatsApp(instanceId, config, null), 5000);
+            updateSessionStatus(instanceId, 'disconnected', {
+                companyName: config.companyName,
+                qr_code: null
+            }).catch(() => null);
+
+            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+            const attempts = (reconnectAttempts.get(instanceId) || 0) + 1;
+            reconnectAttempts.set(instanceId, attempts);
+
+            console.log(`⚠️ [${instanceId}] Connection closed. Reconnect: ${shouldReconnect ? 'yes' : 'no'} (attempt ${attempts}/${maxReconnectAttempts})`);
+
+            if (shouldReconnect && attempts <= maxReconnectAttempts) {
+                setTimeout(() => connectToWhatsApp(instanceId, config, null), 5000);
+            } else {
+                clearSessionRuntime(instanceId);
+            }
         } else if (connection === 'open') {
-            persistStatus(instanceId, 'online');
-            sessionQRs.delete(instanceId);
-            console.log(`✅ ${config.companyName} ONLINE!`);
+            reconnectAttempts.set(instanceId, 0);
+            updateSessionStatus(instanceId, 'online', {
+                companyName: config.companyName,
+                qr_code: null
+            }).catch(() => null);
+            console.log(`✅ [${instanceId}] ${config.companyName} ONLINE!`);
         }
     });
 
@@ -125,72 +214,65 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 }
 
 // --- ENDPOINTS ---
-
-// Connect WhatsApp (QR)
 router.post('/connect', async (req, res) => {
-    const { companyName, customPrompt } = req.body;
+    const { companyName, customPrompt } = req.body || {};
+    const cleanName = String(companyName || '').trim();
+
+    if (!cleanName) {
+        return res.status(400).json({ error: 'companyName es requerido.' });
+    }
+
     const instanceId = `alex_${Date.now()}`;
 
     try {
-        // Start connection process in background (do not pass res)
-        connectToWhatsApp(instanceId, { companyName, customPrompt }, null);
+        await connectToWhatsApp(instanceId, { companyName: cleanName, customPrompt }, res);
 
-        // Return immediately so frontend can start polling
-        res.json({
-            success: true,
-            message: 'Iniciando conexión...',
-            instance_id: instanceId,
-            status: 'connecting'
-        });
+        const timeoutHandle = setTimeout(async () => {
+            if (!res.headersSent) {
+                await updateSessionStatus(instanceId, 'timeout_waiting_qr', {
+                    companyName: cleanName,
+                    qr_code: null
+                });
+
+                res.status(408).json({
+                    error: 'Timeout waiting for QR. Aún estamos conectando con WhatsApp, intenta nuevamente en unos segundos.',
+                    instance_id: instanceId
+                });
+            }
+        }, 90000);
+
+        res.on('close', () => clearTimeout(timeoutHandle));
+        res.on('finish', () => clearTimeout(timeoutHandle));
     } catch (err) {
-        if (!res.headersSent) res.status(500).json({ error: err.message });
-    }
-});
-
-// Get Session Status (Polling Endpoint)
-router.get('/status/:instanceId', async (req, res) => {
-    const { instanceId } = req.params;
-    let status = sessionStatus.get(instanceId);
-    let qr = sessionQRs.get(instanceId);
-
-    // Recovery: Check DB if memory is empty (e.g., after server restart)
-    if (!status) {
-        const data = await supabaseClient.getStatus(instanceId);
-        if (data) {
-            status = data.status;
-            qr = data.qr_code;
-            // Partially restore to memory for faster future access
-            sessionStatus.set(instanceId, status);
-            if (qr) sessionQRs.set(instanceId, qr);
-        }
-    }
-
-    status = status || 'not_found';
-
-    if (qr) {
-        QRCode.toDataURL(qr, (err, url) => {
-            res.json({ status, qr_code: url, instance_id: instanceId });
+        console.error(`❌ [${instanceId}] Connect failed:`, err.message);
+        await updateSessionStatus(instanceId, 'error_connecting', {
+            companyName: cleanName,
+            qr_code: null
         });
-    } else {
-        res.json({ status, instance_id: instanceId });
+        res.status(500).json({ error: err.message });
     }
 });
 
-// Disconnect
-router.post('/disconnect', (req, res) => {
-    const { instanceId } = req.body;
-    if (activeSessions.has(instanceId)) {
+router.post('/disconnect', async (req, res) => {
+    const { instanceId } = req.body || {};
+    if (!instanceId || !activeSessions.has(instanceId)) {
+        return res.status(404).json({ error: 'Instance not found' });
+    }
+
+    try {
         activeSessions.get(instanceId).logout();
-        activeSessions.delete(instanceId);
-        clientConfigs.delete(instanceId);
-        try { fs.rmSync(`./sessions/${instanceId}`, { recursive: true, force: true }); } catch (e) { }
-        res.json({ success: true });
-    } else {
-        res.status(404).json({ error: 'Instance not found' });
-    }
+    } catch (_) { }
+
+    clearSessionRuntime(instanceId);
+    clientConfigs.delete(instanceId);
+    sessionStatus.delete(instanceId);
+    await safeDeletePersistentSession(instanceId);
+
+    try { fs.rmSync(`./sessions/${instanceId}`, { recursive: true, force: true }); } catch (_) { }
+
+    return res.json({ success: true });
 });
 
-// Webhook for Cloud API (360Dialog / Meta)
 router.get('/webhook', (req, res) => {
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
@@ -221,7 +303,6 @@ router.post('/webhook', async (req, res) => {
                     botConfig: { bot_name: 'ALEX IO SaaS', system_prompt: 'Eres ALEX IO.' }
                 });
 
-                // Here you would send the message back via 360Dialog/Meta API
                 console.log(`📩 [Cloud] ${from}: ${text} -> ${result.text.substring(0, 30)}...`);
             }
         }
@@ -231,13 +312,25 @@ router.post('/webhook', async (req, res) => {
     }
 });
 
-// Status
 router.get('/status', (req, res) => {
+    const sessions = Array.from(sessionStatus.entries()).map(([instanceId, info]) => ({ instanceId, ...info }));
+
     res.json({
         active_sessions: activeSessions.size,
+        reconnecting_sessions: Array.from(reconnectAttempts.entries()).filter(([, attempts]) => attempts > 0).length,
+        sessions,
         uptime: process.uptime(),
         cache_stats: global.responseCache?.getStats()
     });
+});
+
+router.get('/status/:instanceId', (req, res) => {
+    const { instanceId } = req.params;
+    const info = sessionStatus.get(instanceId);
+
+    if (!info) return res.status(404).json({ error: 'Instance not found' });
+
+    res.json({ instance_id: instanceId, reconnect_attempts: reconnectAttempts.get(instanceId) || 0, ...info });
 });
 
 module.exports = router;

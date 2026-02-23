@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, Settings, Smartphone, Plus, Loader } from 'lucide-react';
-import { fetchWithApiFallback } from './api';
+import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { fetchWithApiFallback, getLastResolvedApiBase, getPreferredApiBase } from './api';
 
 function Dashboard() {
   const [instances, setInstances] = useState([
@@ -10,99 +10,126 @@ function Dashboard() {
   const [selected, setSelected] = useState(null);
   const [connecting, setConnecting] = useState(false);
   const [qrCode, setQrCode] = useState(null);
-  const [debugApi, setDebugApi] = useState('Detectando...'); // Added for debug visibility
+  const [apiDebugUrl, setApiDebugUrl] = useState(getPreferredApiBase() || 'No resuelta');
+  const [notice, setNotice] = useState(null);
+
+  useEffect(() => {
+    const resolved = getLastResolvedApiBase();
+    if (resolved) setApiDebugUrl(resolved);
+  }, []);
+
+  const pushNotice = (type, message) => {
+    setNotice({ type, message });
+  };
+
+  const waitForQr = (instanceId) => new Promise((resolve, reject) => {
+    const timeoutMs = 120000;
+    const startedAt = Date.now();
+
+    const poll = async () => {
+      try {
+        const statusRes = await fetchWithApiFallback(`/api/saas/status/${instanceId}`);
+        setApiDebugUrl(getLastResolvedApiBase() || getPreferredApiBase() || 'No resuelta');
+
+        if (!statusRes.ok) return;
+
+        const statusData = await statusRes.json();
+        if (statusData.qr_code) {
+          clearInterval(intervalId);
+          return resolve({ type: 'qr', value: statusData.qr_code });
+        }
+
+        if (statusData.status === 'online') {
+          clearInterval(intervalId);
+          return resolve({ type: 'online' });
+        }
+
+        if (statusData.status === 'disconnected') {
+          clearInterval(intervalId);
+          return reject(new Error('WhatsApp desconectó la sesión durante el enlace. Reintenta.'));
+        }
+      } catch (_) {
+        // keep polling
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(intervalId);
+        reject(new Error('No se recibió QR a tiempo. Verifica backend/WhatsApp y reintenta.'));
+      }
+    };
+
+    const intervalId = setInterval(poll, 5000);
+    poll();
+  });
 
   const handleCreateNew = async () => {
-    const name = prompt("Nombre de tu nuevo bot:");
+    const rawName = prompt('Nombre de tu nuevo bot:');
+    const name = (rawName || '').trim();
     if (!name) return;
 
     setConnecting(true);
+    setNotice(null);
+
     try {
       const res = await fetchWithApiFallback('/api/saas/connect', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ companyName: name, customPrompt: 'Eres un asistente virtual de ' + name })
+        body: JSON.stringify({ companyName: name, customPrompt: `Eres un asistente virtual de ${name}` })
       });
 
+      setApiDebugUrl(getLastResolvedApiBase() || getPreferredApiBase() || 'No resuelta');
       const data = await res.json();
 
-      if (data.qr_code) {
-        setQrCode(data.qr_code);
-        addPendingInstance(name, data.instance_id);
-      } else if (data.instance_id) {
-        // We have an instanceId (either from 200 async or 408 timeout), start polling
-        addPendingInstance(name, data.instance_id);
-        startPolling(data.instance_id);
-      } else {
-        alert('Error al conectar: ' + (data.error || 'No se pudo iniciar la instancia'));
+      if (!res.ok && res.status !== 408) {
+        throw new Error(data.error || `Error de conexión (HTTP ${res.status})`);
       }
-    } catch (e) {
-      alert('Error: ' + e.message);
+
+      let qr = data.qr_code;
+
+      if (!qr && res.status === 408 && data.instance_id) {
+        pushNotice('warning', 'Conexión lenta detectada: intentando recuperar QR automáticamente...');
+        const result = await waitForQr(data.instance_id);
+
+        if (result.type === 'online') {
+          setInstances((prev) => [...prev, {
+            id: Date.now(),
+            name,
+            status: 'online',
+            phone: 'Conectado'
+          }]);
+          pushNotice('success', 'La instancia se conectó correctamente sin requerir nuevo QR.');
+          return;
+        }
+
+        qr = result.value;
+      }
+
+      if (!qr) {
+        throw new Error(data.error || 'No se recibió código QR.');
+      }
+
+      setQrCode(qr);
+      setInstances((prev) => [...prev, {
+        id: Date.now(),
+        name,
+        status: 'connecting',
+        phone: 'Escaneando QR...'
+      }]);
+      pushNotice('success', 'QR generado correctamente. Escanéalo para finalizar conexión.');
+    } catch (error) {
+      pushNotice('error', error.message);
+    } finally {
+      setConnecting(false);
     }
-    setConnecting(false);
-  };
-
-  const addPendingInstance = (name, instanceId) => {
-    setInstances(prev => [...prev, {
-      id: instanceId,
-      name,
-      status: 'connecting',
-      phone: 'Iniciando...'
-    }]);
-  };
-
-  const startPolling = (instanceId) => {
-    const interval = setInterval(async () => {
-      try {
-        const res = await fetchWithApiFallback(`/api/saas/status/${instanceId}`);
-        const data = await res.json();
-
-        // QR detected during polling
-        if (data.qr_code && !qrCode) {
-          setQrCode(data.qr_code);
-          setInstances(prev => prev.map(inst =>
-            inst.id === instanceId ? { ...inst, status: 'qr_ready', phone: 'QR Listo para Escaneo' } : inst
-          ));
-        }
-
-        // Success: Connection established
-        if (data.status === 'online') {
-          console.log(`✅ Bot ${instanceId} is now ONLINE! Stopping polling.`);
-          clearInterval(interval);
-          setQrCode(null);
-          setInstances(prev => prev.map(inst =>
-            inst.id === instanceId ? { ...inst, status: 'online', phone: 'Conectado' } : inst
-          ));
-          alert("¡Bot conectado con éxito!");
-        }
-
-        // Failure: Disconnected or expired
-        if (data.status === 'disconnected') {
-          console.warn(`🛑 Bot ${instanceId} disconnected. Polling stopped.`);
-          clearInterval(interval);
-          setInstances(prev => prev.map(inst =>
-            inst.id === instanceId ? { ...inst, status: 'disconnected', phone: 'Fallo al conectar' } : inst
-          ));
-        }
-      } catch (err) {
-        console.error("Polling error:", err);
-      }
-    }, 5000);
-
-    // Safety check: stop polling after 5 minutes
-    setTimeout(() => {
-      clearInterval(interval);
-      console.log("⏰ Polling auto-stopped after 5min.");
-    }, 300000);
   };
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans">
       {qrCode && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div className="bg-slate-800 p-8 rounded-xl text-center">
+          <div className="bg-slate-800 p-8 rounded-xl text-center max-w-sm w-full">
             <h2 className="text-2xl font-bold mb-4">Escanea el QR</h2>
-            <img src={qrCode} alt="QR" className="border-4 border-white p-2 rounded mb-4" />
+            <img src={qrCode} alt="QR" className="border-4 border-white p-2 rounded mb-4 mx-auto" />
             <button onClick={() => setQrCode(null)} className="text-blue-500">Cerrar</button>
           </div>
         </div>
@@ -120,11 +147,23 @@ function Dashboard() {
         </div>
       </header>
 
+      {notice && (
+        <div className={`mx-6 mt-4 p-3 rounded-lg border text-sm flex items-center gap-2 ${notice.type === 'error'
+            ? 'bg-red-900/30 border-red-700 text-red-200'
+            : notice.type === 'warning'
+              ? 'bg-yellow-900/20 border-yellow-700 text-yellow-200'
+              : 'bg-green-900/20 border-green-700 text-green-200'
+          }`}>
+          {notice.type === 'error' ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
+          <span>{notice.message}</span>
+        </div>
+      )}
+
       <main className="flex h-[calc(100vh-64px)]">
         <aside className="w-64 bg-slate-950 border-r border-slate-800 p-4">
           <h2 className="text-xs font-bold uppercase text-slate-500 tracking-widest mb-4">Mis Bots</h2>
           <div className="space-y-2">
-            {instances.map(inst => (
+            {instances.map((inst) => (
               <button
                 key={inst.id}
                 onClick={() => setSelected(inst)}
@@ -191,12 +230,8 @@ function Dashboard() {
         </div>
       </main>
 
-      {/* Debug Footer */}
-      <footer className="bg-slate-950 border-t border-slate-800 p-2 text-[10px] text-slate-600 flex justify-between px-4">
-        <span>v2.1.2 SaaS Core</span>
-        <span onMouseEnter={() => setDebugApi(localStorage.getItem('last_api_hit') || 'Auto')}>
-          📡 API: <span className="text-slate-400">{debugApi}</span>
-        </span>
+      <footer className="fixed bottom-2 right-3 text-[11px] text-slate-400 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded">
+        API activa: {apiDebugUrl}
       </footer>
     </div>
   );

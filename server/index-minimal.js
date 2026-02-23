@@ -638,25 +638,38 @@ async function connectToWhatsApp() {
 
 // Routes moved to top
 
-// --- SaaS ENDPOINTS (v5.2 Refactored for Polling) ---
+// --- SaaS ENDPOINTS (v5.3 Persistent with Supabase) ---
 global.sessionStatus = global.sessionStatus || new Map();
 global.sessionQRs = global.sessionQRs || new Map();
+
+// Helper to save to Supabase
+const persistInstance = async (instanceId, name, status, qr = null) => {
+    if (!supabase) return;
+    try {
+        await supabase.from('saas_instances').upsert({
+            instance_id: instanceId,
+            name: name,
+            status: status,
+            qr_code: qr,
+            updated_at: new Date()
+        }, { onConflict: 'instance_id' });
+    } catch (e) { console.error("Error persisting to Supabase:", e.message); }
+};
 
 app.post(['/saas/connect', '/api/saas/connect'], async (req, res) => {
     const { companyName, customPrompt } = req.body;
     const instanceId = `alex_${Date.now()}`;
 
     try {
-        // Init status
         global.sessionStatus.set(instanceId, 'connecting');
 
-        // Start connection process in background (Note: this specific version uses a global sock, we might need to adjust)
-        // For simplicity in this single-tenant-turned-saas-lite version:
+        // Save to DB immediately
+        await persistInstance(instanceId, companyName, 'connecting');
+
         if (global.connectionStatus !== 'READY' && global.connectionStatus !== 'CONNECTING') {
             connectToWhatsApp();
         }
 
-        // Return immediately so frontend can start polling
         res.json({
             success: true,
             message: 'Iniciando conexión...',
@@ -668,15 +681,42 @@ app.post(['/saas/connect', '/api/saas/connect'], async (req, res) => {
     }
 });
 
-app.get(['/whatsapp/status', '/api/saas/status/:instanceId'], (req, res) => {
-    // Priority: global.qrCodeUrl (Legacy) or sessionQRs
-    const qr = global.qrCodeUrl || global.sessionQRs.get(req.params.instanceId);
+app.get(['/whatsapp/status', '/api/saas/status/:instanceId'], async (req, res) => {
+    const { instanceId } = req.params;
+    let qr = global.qrCodeUrl || global.sessionQRs.get(instanceId);
+    let status = global.connectionStatus;
+
+    // If memory is empty, check DB
+    if (!qr && supabase && instanceId) {
+        const { data } = await supabase.from('saas_instances').select('*').eq('instance_id', instanceId).single();
+        if (data) {
+            qr = data.qr_code;
+            status = data.status;
+        }
+    }
+
     res.json({
-        status: global.connectionStatus,
+        status: status,
         qr: qr,
         persona: global.currentPersona,
-        instance_id: req.params.instanceId
+        instance_id: instanceId
     });
+});
+
+// NEW: Get all persistent instances
+app.get(['/saas/instances', '/api/saas/instances'], async (req, res) => {
+    if (!supabase) return res.json([{ id: 1, name: 'Mi Negocio (Sin DB)', status: 'online', phone: '+1234567890' }]);
+
+    const { data, error } = await supabase.from('saas_instances').select('*').order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    res.json(data.map(inst => ({
+        id: inst.instance_id,
+        name: inst.name,
+        status: inst.status,
+        phone: inst.status === 'online' ? 'Conectado' : 'Pendiente'
+    })));
 });
 
 

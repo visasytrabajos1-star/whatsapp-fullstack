@@ -1,67 +1,73 @@
-// API utility with fallback for development/production
-export async function fetchWithApiFallback(endpoint, options = {}) {
-  const getBaseUrl = () => {
-    // 1. Environment Variable (Vercel/Render)
-    if (process.env.REACT_APP_API_URL) return process.env.REACT_APP_API_URL;
+const normalize = (url) => (url || '').replace(/\/$/, '');
 
-    // 2. Intelligent Detection for Render
-    if (typeof window !== 'undefined') {
-      const origin = window.location.origin;
+const RENDER_BACKEND_HINT = process.env.REACT_APP_RENDER_BACKEND_URL || 'https://whatsapp-fullstack-gkm6.onrender.com';
+const DEFAULT_TIMEOUT_MS = Number(process.env.REACT_APP_API_TIMEOUT_MS || 20000);
+let lastResolvedApiBase = null;
 
-      // Handle Render's -client to -server automatic mapping
-      if (origin.includes('-client')) {
-        return origin.replace('-client', '-server');
-      }
+const getFallbackBases = () => {
+  if (typeof window === 'undefined') return [RENDER_BACKEND_HINT];
 
-      // Known specific user URLs
-      if (origin.includes('whatsapp-fullstack-1')) {
-        return 'https://whatsapp-fullstack-gkm6.onrender.com';
-      }
+  const origin = normalize(window.location.origin);
+  const hostname = window.location.hostname;
+  const fallbacks = [RENDER_BACKEND_HINT];
 
-      return origin;
-    }
+  if (hostname.includes('-client.')) {
+    fallbacks.push(origin.replace('-client.', '-server.'));
+  }
 
-    // 3. Last Resort Fallback (User's working backend)
-    return 'https://whatsapp-fullstack-gkm6.onrender.com';
-  };
+  if (hostname.endsWith('.onrender.com') && hostname !== 'whatsapp-fullstack-gkm6.onrender.com') {
+    fallbacks.push('https://whatsapp-fullstack-gkm6.onrender.com');
+  }
 
-  const baseUrl = getBaseUrl();
-  const secondaryUrl = 'http://localhost:3000';
+  fallbacks.push(origin);
 
-  const fetchOptions = {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  };
+  return fallbacks.filter(Boolean);
+};
 
-  try {
-    const url = `${baseUrl.replace(/\/$/, '')}${endpoint}`;
-    localStorage.setItem('last_api_hit', baseUrl); // Store for debug footer
-    console.log(`📡 Fetching: ${url}`);
+const getApiBases = () => {
+  const envBase = normalize(process.env.REACT_APP_API_URL);
+  const bases = envBase ? [envBase] : [];
 
-    const response = await fetch(url, fetchOptions);
-    // Allow 408 Timeout but with JSON body (used for polling)
-    if (response.ok || response.status === 408) return response;
+  for (const fallback of getFallbackBases()) {
+    if (!bases.includes(fallback)) bases.push(fallback);
+  }
 
-    // Fallback if not found or server error
-    if (baseUrl !== secondaryUrl) {
-      const fallbackResponse = await fetch(`${secondaryUrl}${endpoint}`, fetchOptions);
-      if (fallbackResponse.ok) return fallbackResponse;
-    }
+  return bases;
+};
 
-    return response;
-  } catch (error) {
-    console.error("Fetch error:", error);
-    // Last resort: retry on localhost if not already there
+export const getPreferredApiBase = () => getApiBases()[0] || null;
+export const getLastResolvedApiBase = () => lastResolvedApiBase;
+
+const shouldTryNextBase = (response) => {
+  if (!response) return true;
+  return [404, 502, 503, 504].includes(response.status);
+};
+
+export const fetchWithApiFallback = async (path, options = {}) => {
+  const bases = getApiBases();
+  const errors = [];
+
+  for (const base of bases) {
+    const url = `${base}${path}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
     try {
-      if (baseUrl !== secondaryUrl) {
-        return await fetch(`${secondaryUrl}${endpoint}`, fetchOptions);
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(timeout);
+
+      if (!response.ok && shouldTryNextBase(response)) {
+        errors.push(`${url} → HTTP ${response.status}`);
+        continue;
       }
-      throw error;
-    } catch (e) {
-      throw new Error('API no disponible. Verifica que el servidor esté encendido.');
+
+      lastResolvedApiBase = base;
+      return response;
+    } catch (error) {
+      clearTimeout(timeout);
+      errors.push(`${url} → ${error.name === 'AbortError' ? `timeout ${DEFAULT_TIMEOUT_MS}ms` : error.message}`);
     }
   }
-}
+
+  throw new Error(`No se pudo conectar al backend. Intentos: ${errors.join(' | ')}`);
+};
