@@ -20,6 +20,7 @@ function SaasDashboard() {
   const [apiDebugUrl, setApiDebugUrl] = useState(getPreferredApiBase() || 'No resuelta');
   const [notice, setNotice] = useState(null);
   const [configDraft, setConfigDraft] = useState({
+    name: '',
     provider: 'baileys',
     customPrompt: 'Eres un asistente virtual amigable y profesional.',
     metaApiUrl: '',
@@ -36,6 +37,7 @@ function SaasDashboard() {
   useEffect(() => {
     if (!selected) return;
     setConfigDraft({
+      name: selected.name || '',
       provider: selected.provider || 'baileys',
       customPrompt: selected.customPrompt || 'Eres un asistente virtual amigable y profesional.',
       metaApiUrl: selected.metaApiUrl || '',
@@ -259,47 +261,51 @@ function SaasDashboard() {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">Nombre del Bot</label>
-                    <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.name || selected.name} onChange={(e) => setConfigDraft((prev) => ({ ...prev, name: e.target.value }))} />
+                    <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.name} onChange={(e) => setConfigDraft((prev) => ({ ...prev, name: e.target.value }))} />
                   </div>
 
                   <div>
-                    <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp</label>
+                    <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp (QR o Cloud)</label>
                     <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
                       {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                     </select>
                   </div>
 
                   <div>
-                    <label className="block text-sm text-slate-400 mb-1">Prompt Personalizado</label>
+                    <label className="block text-sm text-slate-400 mb-1">Prompt Personalizado (Cerebro AI)</label>
                     <textarea className="w-full bg-slate-900 border border-slate-700 rounded p-2 h-32" value={configDraft.customPrompt} onChange={(e) => setConfigDraft((prev) => ({ ...prev, customPrompt: e.target.value }))} />
                   </div>
 
                   {configDraft.provider === 'meta' && (
-                    <div className="space-y-3">
+                    <div className="space-y-3 p-3 bg-slate-900 rounded border border-blue-500/30">
+                      <h4 className="text-sm font-bold text-blue-400">Configuración Meta Cloud API</h4>
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Meta API URL</label>
-                        <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" placeholder="https://graph.facebook.com/v20.0" value={configDraft.metaApiUrl} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaApiUrl: e.target.value }))} />
+                        <label className="block text-xs text-slate-400 mb-1">Meta API URL</label>
+                        <input className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" placeholder="https://graph.facebook.com/v20.0" value={configDraft.metaApiUrl} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaApiUrl: e.target.value }))} />
                       </div>
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Phone Number ID</label>
-                        <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.metaPhoneNumberId} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaPhoneNumberId: e.target.value }))} />
+                        <label className="block text-xs text-slate-400 mb-1">Phone Number ID</label>
+                        <input className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" value={configDraft.metaPhoneNumberId} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaPhoneNumberId: e.target.value }))} />
                       </div>
                       <div>
-                        <label className="block text-sm text-slate-400 mb-1">Access Token</label>
-                        <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" type="password" value={configDraft.metaAccessToken} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaAccessToken: e.target.value }))} />
+                        <label className="block text-xs text-slate-400 mb-1">Access Token</label>
+                        <input className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" type="password" value={configDraft.metaAccessToken} onChange={(e) => setConfigDraft((prev) => ({ ...prev, metaAccessToken: e.target.value }))} />
                       </div>
                     </div>
                   )}
 
                   {configDraft.provider === '360dialog' && (
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">360Dialog API Key</label>
-                      <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" type="password" value={configDraft.dialogApiKey} onChange={(e) => setConfigDraft((prev) => ({ ...prev, dialogApiKey: e.target.value }))} />
+                    <div className="space-y-3 p-3 bg-slate-900 rounded border border-green-500/30">
+                      <h4 className="text-sm font-bold text-green-400">Configuración 360Dialog</h4>
+                      <div>
+                        <label className="block text-xs text-slate-400 mb-1">360Dialog API Key</label>
+                        <input className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm" type="password" value={configDraft.dialogApiKey} onChange={(e) => setConfigDraft((prev) => ({ ...prev, dialogApiKey: e.target.value }))} />
+                      </div>
                     </div>
                   )}
 
-                  <button onClick={handleSaveConfig} disabled={savingConfig} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded font-bold disabled:opacity-50">
-                    {savingConfig ? 'Guardando...' : 'Guardar'}
+                  <button onClick={handleSaveConfig} disabled={savingConfig} className="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-bold disabled:opacity-50 transition-colors">
+                    {savingConfig ? 'Guardando...' : 'Guardar Configuración'}
                   </button>
                 </div>
               </div>
@@ -307,9 +313,12 @@ function SaasDashboard() {
               <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> Actividad Reciente</h3>
                 <div className="space-y-3">
-                  <div className="bg-slate-900 p-3 rounded border border-slate-800 text-sm">
-                    <p className="text-slate-300">Canal activo: {providerLabel}</p>
-                    <p className="text-blue-400 mt-1 text-xs">Estado: {selected.status || 'desconocido'}</p>
+                  <div className="bg-slate-900 p-4 rounded border border-slate-800 text-sm">
+                    <p className="text-slate-300">Canal activo: <span className="font-bold text-white">{providerLabel}</span></p>
+                    <p className="text-blue-400 mt-1 text-xs uppercase tracking-widest">Estado: {selected.status || 'desconocido'}</p>
+                    <div className="mt-4 pt-4 border-t border-slate-800">
+                      <p className="text-slate-500 text-[10px]">Historial de mensajes optimizado para este bot.</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -317,14 +326,14 @@ function SaasDashboard() {
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-slate-500">
               <Smartphone size={64} className="mb-4 opacity-20" />
-              <p>Selecciona un bot para comenzar</p>
+              <p>Selecciona un bot del panel lateral para administrar su configuración.</p>
             </div>
           )}
         </div>
       </main>
 
       <footer className="fixed bottom-2 right-3 text-[11px] text-slate-400 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded">
-        API activa: {apiDebugUrl}
+        v2.0.4.5 Hardened | API: {apiDebugUrl}
       </footer>
     </div>
   );
