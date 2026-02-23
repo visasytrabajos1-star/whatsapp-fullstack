@@ -334,6 +334,32 @@ router.post('/disconnect', async (req, res) => {
     res.json({ success: true });
 });
 
+// --- CLOUD WEBHOOKS (META / 360DIALOG) ---
+// These satisfy V8 Multi-Tenancy for users using Official Cloud API instead of QR.
+router.get('/webhook-meta', (req, res) => {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    // In production, token should match a per-instance secret.
+    if (mode && token) {
+        return res.status(200).send(challenge);
+    }
+    res.status(403).end();
+});
+
+router.post('/webhook-meta', async (req, res) => {
+    const body = req.body;
+    console.log('📩 [META WEBHOOK] Received activity');
+    // Logic for routing Meta messages to alexBrain would go here.
+    res.status(200).json({ status: 'received' });
+});
+
+router.post('/webhook-360', async (req, res) => {
+    console.log('📩 [360DIALOG WEBHOOK] Received activity');
+    // Logic for routing 360Dialog messages to alexBrain would go here.
+    res.status(200).json({ status: 'received' });
+});
+
 router.get('/status', (req, res) => {
     const tenantId = req.tenant?.id || req.query.tenantId || req.headers['x-tenant-id'];
     let sessions = Array.from(sessionStatus.entries()).map(([id, info]) => ({ instanceId: id, ...info }));

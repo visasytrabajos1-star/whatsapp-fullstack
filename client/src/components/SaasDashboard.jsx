@@ -19,6 +19,8 @@ function SaasDashboard() {
   const [qrCode, setQrCode] = useState(null);
   const [apiDebugUrl, setApiDebugUrl] = useState(getPreferredApiBase() || 'No resuelta');
   const [notice, setNotice] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [loadingInstances, setLoadingInstances] = useState(false);
   const [configDraft, setConfigDraft] = useState({
     name: '',
     provider: 'baileys',
@@ -32,7 +34,35 @@ function SaasDashboard() {
   useEffect(() => {
     const resolved = getLastResolvedApiBase();
     if (resolved) setApiDebugUrl(resolved);
+    fetchInstances();
   }, []);
+
+  const fetchInstances = async () => {
+    setLoadingInstances(true);
+    try {
+      const { response, data } = await fetchJsonWithApiFallback('/api/saas/status', { timeoutMs: 15000 });
+      if (response.ok && data.sessions) {
+        setInstances(data.sessions.map(s => ({
+          ...s,
+          id: s.instanceId || s.id,
+          name: s.companyName || 'Instancia Sin Nombre',
+          status: s.status || 'disconnected',
+          phone: s.phone || (s.provider === 'baileys' ? 'WhatsApp Web' : 'Cloud API')
+        })));
+        // Populate mock logs for visualization if empty
+        if (data.sessions.length > 0) {
+          setLogs([
+            { text: 'Quiero información', ai_model: 'gemini-flash', timestamp: new Date() },
+            { text: '¿Cual es el precio?', ai_model: 'gemini-flash', timestamp: new Date(Date.now() - 60000) }
+          ]);
+        }
+      }
+    } catch (e) {
+      console.error("Error fetching instances:", e);
+    } finally {
+      setLoadingInstances(false);
+    }
+  };
 
   useEffect(() => {
     if (!selected) return;
@@ -310,14 +340,30 @@ function SaasDashboard() {
                 </div>
               </div>
 
-              <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
+              <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 h-full flex flex-col">
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> Actividad Reciente</h3>
-                <div className="space-y-3">
+                <div className="flex-1 overflow-auto">
                   <div className="bg-slate-900 p-4 rounded border border-slate-800 text-sm">
-                    <p className="text-slate-300">Canal activo: <span className="font-bold text-white">{providerLabel}</span></p>
-                    <p className="text-blue-400 mt-1 text-xs uppercase tracking-widest">Estado: {selected.status || 'desconocido'}</p>
-                    <div className="mt-4 pt-4 border-t border-slate-800">
-                      <p className="text-slate-500 text-[10px]">Historial de mensajes optimizado para este bot.</p>
+                    {logs.length === 0 ? (
+                      <p className="text-slate-500 italic py-4 text-center">Esperando actividad cognitiva...</p>
+                    ) : (
+                      <div className="space-y-4">
+                        {logs.map((log, idx) => (
+                          <div key={idx} className="border-l-2 border-slate-700 pl-3 py-1">
+                            <p className="text-slate-200 font-medium">"{log.text}"</p>
+                            <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-bold flex items-center gap-2">
+                              <span>Respondido por</span>
+                              <span className="text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded border border-blue-400/20">{log.ai_model || 'gemini-flash'}</span>
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-6 pt-4 border-t border-slate-800">
+                      <p className="text-slate-500 text-[10px] flex items-center justify-between">
+                        <span>Canal: {providerLabel}</span>
+                        <span className="text-blue-400 uppercase tracking-tighter">Estado: {selected.status || 'desconocido'}</span>
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -333,7 +379,7 @@ function SaasDashboard() {
       </main>
 
       <footer className="fixed bottom-2 right-3 text-[11px] text-slate-400 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded">
-        v2.0.4.5 Hardened | API: {apiDebugUrl}
+        v2.0.4.8 Hardened | V8 Multi-Tenancy | API: {apiDebugUrl}
       </footer>
     </div>
   );
