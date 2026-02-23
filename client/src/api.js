@@ -6,17 +6,30 @@ const FORCE_PRIMARY_BACKEND = import.meta.env.VITE_FORCE_PRIMARY_BACKEND !== 'fa
 const ALLOW_ORIGIN_FALLBACK = import.meta.env.VITE_ALLOW_ORIGIN_FALLBACK === 'true';
 let lastResolvedApiBase = null;
 
+const getFallbackBases = () => {
+  if (typeof window === 'undefined') return [RENDER_BACKEND_HINT];
+  const origin = normalize(window.location.origin);
+  const hostname = window.location.hostname;
+  const fallbacks = [RENDER_BACKEND_HINT];
+
+  // Auto-suffix support for Render/Vercel deployments
+  if (hostname.includes('-client.')) {
+    fallbacks.push(origin.replace('-client.', '-server.'));
+  }
+  if (hostname.endsWith('.onrender.com') && hostname !== 'whatsapp-fullstack-gkm6.onrender.com') {
+    fallbacks.push('https://whatsapp-fullstack-gkm6.onrender.com');
+  }
+
+  fallbacks.push(origin);
+  return fallbacks.filter(Boolean);
+};
+
 const getApiBases = () => {
   const envBase = normalize(import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL);
-  const primaryBase = envBase || RENDER_BACKEND_HINT;
+  const bases = envBase ? [envBase] : [];
 
-  if (FORCE_PRIMARY_BACKEND) return [primaryBase];
-
-  const bases = [primaryBase];
-
-  if (ALLOW_ORIGIN_FALLBACK && typeof window !== 'undefined') {
-    const origin = normalize(window.location.origin);
-    if (origin && !bases.includes(origin)) bases.push(origin);
+  for (const fallback of getFallbackBases()) {
+    if (!bases.includes(fallback)) bases.push(fallback);
   }
 
   return bases;
