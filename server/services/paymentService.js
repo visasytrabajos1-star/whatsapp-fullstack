@@ -1,4 +1,14 @@
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+// Lazy Stripe initialization to prevent crash when STRIPE_SECRET_KEY is missing
+let _stripe = null;
+const getStripe = () => {
+    if (!_stripe) {
+        if (!process.env.STRIPE_SECRET_KEY) {
+            throw new Error('STRIPE_SECRET_KEY no configurado. Pagos deshabilitados.');
+        }
+        _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+    }
+    return _stripe;
+};
 
 // Price IDs de Stripe (configura en tu dashboard de Stripe)
 const PRICES = {
@@ -11,7 +21,7 @@ class PaymentService {
     // Crear sesión de pago Stripe
     async createCheckoutSession(userEmail, priceId, successUrl, cancelUrl) {
         try {
-            const session = await stripe.checkout.sessions.create({
+            const session = await getStripe().checkout.sessions.create({
                 payment_method_types: ['card'],
                 line_items: [
                     {
@@ -37,7 +47,7 @@ class PaymentService {
     // Crear link de pago único (para planes prepago)
     async createPaymentLink(priceId, quantity = 1) {
         try {
-            const paymentLink = await stripe.paymentLinks.create({
+            const paymentLink = await getStripe().paymentLinks.create({
                 line_items: [{ price: priceId, quantity }],
                 metadata: { platform: 'ALEX_IO' }
             });
@@ -51,7 +61,7 @@ class PaymentService {
     // Verificar estado de suscripción
     async getSubscription(subscriptionId) {
         try {
-            const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+            const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
             return subscription;
         } catch (error) {
             console.error('❌ Stripe Get Subscription Error:', error.message);
@@ -62,7 +72,7 @@ class PaymentService {
     // Cancelar suscripción
     async cancelSubscription(subscriptionId) {
         try {
-            const subscription = await stripe.subscriptions.cancel(subscriptionId);
+            const subscription = await getStripe().subscriptions.cancel(subscriptionId);
             return subscription;
         } catch (error) {
             console.error('❌ Stripe Cancel Error:', error.message);
@@ -72,7 +82,7 @@ class PaymentService {
 
     // Webhook de Stripe (para escuchar eventos)
     constructWebhookEvent(payload, signature) {
-        return stripe.webhooks.constructEvent(
+        return getStripe().webhooks.constructEvent(
             payload,
             signature,
             process.env.STRIPE_WEBHOOK_SECRET
