@@ -1,8 +1,55 @@
-import { X, Check, Crown, Star, Zap } from 'lucide-react';
+import { X, Check, Crown, Star, Zap, CreditCard, Bitcoin, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useState } from 'react';
+import { fetchWithApiFallback } from '../api';
 
 const PricingModal = ({ isOpen, onClose }) => {
+    const [loading, setLoading] = useState(false);
+    const [email, setEmail] = useState('');
+    const [status, setStatus] = useState('');
+
     if (!isOpen) return null;
+
+    const handlePayment = async (planId, method) => {
+        if (!email) {
+            alert("Por favor ingresa tu email para continuar.");
+            return;
+        }
+
+        setLoading(true);
+        setStatus(`Conectando con ${method}...`);
+
+        try {
+            const endpoint = method === 'stripe'
+                ? '/api/payments/stripe/checkout'
+                : '/api/payments/crypto/invoice';
+
+            const { response, data } = await fetchWithApiFallback(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email,
+                    plan: planId,
+                    currency: 'USDT' // Default for crypto
+                })
+            });
+
+            if (method === 'stripe' && data.url) {
+                window.location.href = data.url;
+            } else if (method === 'crypto') {
+                // For crypto, we might want to show an invoice UI or alert the user
+                alert(`Factura Crypto Generada ID: ${data.id}. Por favor sigue las instrucciones enviadas a ${email}`);
+            } else {
+                throw new Error("Respuesta de pago inválida.");
+            }
+        } catch (e) {
+            console.error("Payment error:", e);
+            alert(`Error al procesar pago: ${e.message}`);
+        } finally {
+            setLoading(false);
+            setStatus('');
+        }
+    };
 
     return (
         <AnimatePresence>
@@ -26,9 +73,16 @@ const PricingModal = ({ isOpen, onClose }) => {
                             <Crown className="w-8 h-8 text-white" />
                         </div>
                         <h2 className="text-3xl font-bold text-white mb-2">Desbloquea tu Potencial</h2>
-                        <p className="text-slate-400 max-w-sm mx-auto">
-                            Acelera tu aprendizaje con herramientas avanzadas y práctica ilimitada.
-                        </p>
+
+                        <div className="max-w-xs mx-auto mt-4">
+                            <input
+                                type="email"
+                                placeholder="Tu email para la facturación"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                            />
+                        </div>
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-0">
@@ -40,15 +94,15 @@ const PricingModal = ({ isOpen, onClose }) => {
                             <ul className="space-y-4 mb-8">
                                 <li className="flex items-center gap-3 text-slate-300">
                                     <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                                    <span>3 Escenarios Básicos</span>
+                                    <span>3 Bots Básicos</span>
                                 </li>
                                 <li className="flex items-center gap-3 text-slate-300">
                                     <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                                    <span>50 Mensajes / día</span>
+                                    <span>1,000 Mensajes / mes</span>
                                 </li>
                                 <li className="flex items-center gap-3 text-slate-300">
                                     <Check className="w-5 h-5 text-emerald-500 shrink-0" />
-                                    <span>Feedback Básico</span>
+                                    <span>Soporte por Email</span>
                                 </li>
                             </ul>
 
@@ -78,38 +132,43 @@ const PricingModal = ({ isOpen, onClose }) => {
                                     <div className="p-1 bg-indigo-500/20 rounded-full">
                                         <Check className="w-4 h-4 text-indigo-400" />
                                     </div>
-                                    <span>Escenarios Ilimitados</span>
+                                    <span>Sesiones Ilimitadas (V8)</span>
                                 </li>
                                 <li className="flex items-center gap-3 text-white">
                                     <div className="p-1 bg-indigo-500/20 rounded-full">
                                         <Check className="w-4 h-4 text-indigo-400" />
                                     </div>
-                                    <span>Voz Ultra-Realista (ElevenLabs)</span>
+                                    <span>Voz TTS Ultra-Realista</span>
                                 </li>
                                 <li className="flex items-center gap-3 text-white">
                                     <div className="p-1 bg-indigo-500/20 rounded-full">
                                         <Check className="w-4 h-4 text-indigo-400" />
                                     </div>
-                                    <span>Análisis de Pronunciación</span>
-                                </li>
-                                <li className="flex items-center gap-3 text-white">
-                                    <div className="p-1 bg-indigo-500/20 rounded-full">
-                                        <Check className="w-4 h-4 text-indigo-400" />
-                                    </div>
-                                    <span>Sin Límite de Mensajes</span>
+                                    <span>Multi-Provider (Meta/360)</span>
                                 </li>
                             </ul>
 
-                            <button
-                                className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold hover:shadow-lg hover:shadow-indigo-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-                                onClick={() => alert("¡Próximamente! Integración con Stripe en progreso.")}
-                            >
-                                <span className="flex items-center justify-center gap-2">
-                                    <Zap className="w-4 h-4 fill-white" />
-                                    Mejorar Ahora
-                                </span>
-                            </button>
-                            <p className="text-xs text-center text-slate-500 mt-3">Cancela cuando quieras.</p>
+                            <div className="space-y-3">
+                                <button
+                                    disabled={loading}
+                                    className="w-full py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-bold hover:shadow-lg hover:shadow-indigo-500/25 transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-50 flex items-center justify-center gap-2"
+                                    onClick={() => handlePayment('PRO', 'stripe')}
+                                >
+                                    {loading ? <Loader2 className="animate-spin" size={20} /> : <CreditCard size={20} />}
+                                    Pagar con Tarjeta
+                                </button>
+
+                                <button
+                                    disabled={loading}
+                                    className="w-full py-3 rounded-xl border border-slate-700 text-slate-300 font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                                    onClick={() => handlePayment('PRO', 'crypto')}
+                                >
+                                    <Bitcoin size={20} className="text-orange-500" />
+                                    Pagar con Crypto
+                                </button>
+                            </div>
+
+                            {status && <p className="text-[10px] text-center text-indigo-400 mt-2 animate-pulse">{status}</p>}
                         </div>
                     </div>
                 </motion.div>

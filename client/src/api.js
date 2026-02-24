@@ -43,10 +43,24 @@ const shouldTryNextBase = (response) => {
   return [404, 502, 503, 504].includes(response.status);
 };
 
+import { supabase } from './supabaseClient';
+
 export const fetchWithApiFallback = async (path, options = {}) => {
   const { timeoutMs = DEFAULT_TIMEOUT_MS, ...fetchOptions } = options;
   const bases = getApiBases();
   const errors = [];
+
+  // Auto-inject Supabase JWT if available
+  let token = null;
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession();
+    token = session?.access_token;
+  }
+
+  const headers = {
+    ...fetchOptions.headers,
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
 
   for (const base of bases) {
     const url = `${base}${path}`;
@@ -54,7 +68,7 @@ export const fetchWithApiFallback = async (path, options = {}) => {
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const response = await fetch(url, { ...fetchOptions, signal: controller.signal });
+      const response = await fetch(url, { ...fetchOptions, headers, signal: controller.signal });
       clearTimeout(timeout);
 
       if (!response.ok && shouldTryNextBase(response)) {
