@@ -328,9 +328,10 @@ function SaasDashboard() {
       )}
 
       <header className="bg-slate-950 border-b border-slate-800 p-4 flex justify-between items-center">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Shield className="text-blue-500" size={28} />
           <h1 className="text-2xl font-bold">ALEX <span className="text-blue-500">IO</span></h1>
+          <span className="text-[10px] bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold px-2 py-0.5 rounded-full">{VERSION}</span>
         </div>
         <div className="flex gap-4">
           <Link to="/pricing" className="bg-blue-600 px-4 py-2 rounded font-bold hover:bg-blue-500">Planes</Link>

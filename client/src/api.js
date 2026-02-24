@@ -51,11 +51,36 @@ export const fetchWithApiFallback = async (path, options = {}) => {
   const bases = getApiBases();
   const errors = [];
 
-  // Auto-inject Supabase JWT if available
+  // Auto-inject JWT: first try Supabase session, then try cached backend token
   let token = null;
+
+  // 1. Try Supabase session token
   if (supabase) {
-    const { data: { session } } = await supabase.auth.getSession();
-    token = session?.access_token;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      token = session?.access_token || null;
+    } catch (_) { }
+  }
+
+  // 2. If no Supabase token, try a cached backend JWT or auto-login
+  if (!token) {
+    token = localStorage.getItem('alex_io_token');
+    if (!token) {
+      // Auto-login with admin identity to get a backend JWT
+      const demoEmail = localStorage.getItem('demo_email') || 'visasytrabajos@gmail.com';
+      try {
+        const loginRes = await fetch(`${getApiBases()[0]}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: demoEmail })
+        });
+        if (loginRes.ok) {
+          const loginData = await loginRes.json();
+          token = loginData.token;
+          if (token) localStorage.setItem('alex_io_token', token);
+        }
+      } catch (_) { }
+    }
   }
 
   const headers = {

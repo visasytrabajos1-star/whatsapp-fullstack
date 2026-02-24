@@ -77,19 +77,28 @@ const { JWT_SECRET } = require('./middleware/auth');
 
 app.post('/api/auth/login', (req, res) => {
     const { email } = req.body;
-
-    // Simulación de login para desarrollo (En W2 implementaremos persistencia de users)
     if (!email) return res.status(400).json({ error: 'Email es requerido' });
 
-    const tenantId = `tenant_${Buffer.from(email).toString('base64').substring(0, 8)}`;
+    // Admin list - these get ENTERPRISE + SUPERADMIN access
+    const ADMIN_EMAILS = [
+        'visasytrabajos@gmail.com',
+        'admin@demo.com'
+    ];
+
+    const isAdmin = ADMIN_EMAILS.includes(email.toLowerCase().trim());
+
+    const tenantId = isAdmin
+        ? 'tenant_superadmin'
+        : `tenant_${Buffer.from(email).toString('base64').substring(0, 8)}`;
+
     const token = jwt.sign({
         tenantId,
         email,
-        plan: 'PRO', // Default para pruebas
-        role: 'OWNER'
+        plan: isAdmin ? 'ENTERPRISE' : 'PRO',
+        role: isAdmin ? 'SUPERADMIN' : 'OWNER'
     }, JWT_SECRET, { expiresIn: '7d' });
 
-    res.json({ token, tenantId });
+    res.json({ token, tenantId, role: isAdmin ? 'SUPERADMIN' : 'OWNER' });
 });
 
 // --- ROUTES ---
