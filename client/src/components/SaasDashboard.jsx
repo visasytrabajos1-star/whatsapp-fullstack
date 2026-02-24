@@ -1,13 +1,49 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Component } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import { fetchJsonWithApiFallback, getLastResolvedApiBase, getPreferredApiBase } from '../api';
+
+const VERSION = 'v2.0.4.16';
 
 const PROVIDERS = [
   { value: 'baileys', label: 'Baileys (QR)' },
   { value: 'meta', label: 'Meta Cloud API' },
   { value: '360dialog', label: '360Dialog' }
 ];
+
+// --- Error Boundary to prevent full page crashes ---
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error("Dashboard Error Boundary:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-8">
+          <div className="bg-red-900/20 border border-red-500/30 rounded-xl p-8 max-w-lg text-center">
+            <AlertTriangle size={48} className="text-red-400 mx-auto mb-4" />
+            <h2 className="text-xl font-bold text-white mb-2">Error del Dashboard</h2>
+            <p className="text-red-300 text-sm mb-4">{this.state.error?.message}</p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="bg-red-600 hover:bg-red-500 text-white px-6 py-2 rounded-lg font-bold"
+            >
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function SaasDashboard() {
   const [instances, setInstances] = useState([
@@ -21,6 +57,9 @@ function SaasDashboard() {
   const [notice, setNotice] = useState(null);
   const [logs, setLogs] = useState([]);
   const [loadingInstances, setLoadingInstances] = useState(false);
+  const [showNewBotModal, setShowNewBotModal] = useState(false);
+  const [newBotName, setNewBotName] = useState('');
+  const [newBotProvider, setNewBotProvider] = useState('baileys');
   const [configDraft, setConfigDraft] = useState({
     name: '',
     provider: 'baileys',
@@ -49,7 +88,6 @@ function SaasDashboard() {
           status: s.status || 'disconnected',
           phone: s.phone || (s.provider === 'baileys' ? 'WhatsApp Web' : 'Cloud API')
         })));
-        // Populate mock logs for visualization if empty
         if (data.sessions.length > 0) {
           setLogs([
             { text: 'Quiero información', ai_model: 'gemini-flash', timestamp: new Date() },
@@ -123,13 +161,12 @@ function SaasDashboard() {
   });
 
   const handleCreateNew = async () => {
-    const rawName = prompt('Nombre de tu nuevo bot:');
-    const name = (rawName || '').trim();
+    const name = (newBotName || '').trim();
     if (!name) return;
+    const provider = newBotProvider || 'baileys';
 
-    const rawProvider = prompt('Canal (baileys | meta | 360dialog):', 'baileys');
-    const provider = ['baileys', 'meta', '360dialog'].includes((rawProvider || '').trim()) ? (rawProvider || '').trim() : 'baileys';
-
+    setShowNewBotModal(false);
+    setNewBotName('');
     setConnecting(true);
     setNotice(null);
 
@@ -236,6 +273,50 @@ function SaasDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans">
+      {/* New Bot Modal */}
+      {showNewBotModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold">Nuevo Bot</h3>
+              <button onClick={() => setShowNewBotModal(false)} className="text-slate-400 hover:text-white">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Nombre del Bot</label>
+                <input
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  placeholder="Ej: Mi Tienda Online"
+                  value={newBotName}
+                  onChange={(e) => setNewBotName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateNew()}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp</label>
+                <select
+                  className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white"
+                  value={newBotProvider}
+                  onChange={(e) => setNewBotProvider(e.target.value)}
+                >
+                  {PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                </select>
+              </div>
+              <button
+                onClick={handleCreateNew}
+                disabled={!newBotName.trim()}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 rounded-lg disabled:opacity-50"
+              >
+                Crear Bot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {qrCode && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
           <div className="bg-slate-800 p-8 rounded-xl text-center max-w-sm w-full">
@@ -278,7 +359,7 @@ function SaasDashboard() {
               </button>
             ))}
           </div>
-          <button onClick={handleCreateNew} disabled={connecting} className="w-full mt-4 py-2 border border-dashed border-slate-700 text-slate-500 rounded-lg hover:border-blue-500 hover:text-blue-500 flex items-center justify-center gap-2 disabled:opacity-50">
+          <button onClick={() => setShowNewBotModal(true)} disabled={connecting} className="w-full mt-4 py-2 border border-dashed border-slate-700 text-slate-500 rounded-lg hover:border-blue-500 hover:text-blue-500 flex items-center justify-center gap-2 disabled:opacity-50">
             {connecting ? <Loader className="animate-spin" size={16} /> : <Plus size={16} />} Nuevo Bot
           </button>
         </aside>
@@ -378,11 +459,18 @@ function SaasDashboard() {
         </div>
       </main>
 
-      <footer className="fixed bottom-2 right-3 text-[11px] text-slate-400 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded">
-        v2.0.4.16 Hardened | V8 Multi-Tenancy | API: {apiDebugUrl}
+      <footer className="fixed bottom-2 right-3 text-[11px] text-slate-400 bg-slate-950/90 border border-slate-800 px-2 py-1 rounded flex items-center gap-2">
+        <span className="text-blue-400 font-bold">{VERSION}</span>
+        <span>Hardened | V8 Multi-Tenancy | API: {apiDebugUrl}</span>
       </footer>
     </div>
   );
 }
 
-export default SaasDashboard;
+export default function SaasDashboardWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <SaasDashboard />
+    </ErrorBoundary>
+  );
+}
