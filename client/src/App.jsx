@@ -33,35 +33,57 @@ function App() {
       return;
     }
 
+    // Helper: build a session from our own JWT stored in localStorage
+    const buildJwtSession = () => {
+      const backendToken = localStorage.getItem('alex_io_token');
+      if (!backendToken) return null;
+      const demoEmail = localStorage.getItem('demo_email') || 'user@app.com';
+      const userRole = localStorage.getItem('alex_io_role') || 'OWNER';
+      const tenantId = localStorage.getItem('alex_io_tenant') || '';
+      console.log("🔑 [ALEX IO] Backend JWT found for:", demoEmail, "role:", userRole);
+      return {
+        user: { id: 'backend-jwt-user', email: demoEmail, role: userRole, tenantId },
+        access_token: backendToken
+      };
+    };
+
     if (!supabase) {
       console.warn("⚠️ [ALEX IO] Supabase client is NULL or missing config");
-      // Check for backend JWT token in localStorage
-      const backendToken = localStorage.getItem('alex_io_token');
-      if (backendToken) {
-        const demoEmail = localStorage.getItem('demo_email') || 'user@app.com';
-        const userRole = localStorage.getItem('alex_io_role') || 'OWNER';
-        const tenantId = localStorage.getItem('alex_io_tenant') || '';
-        console.log("🔑 [ALEX IO] Backend JWT found, creating session for:", demoEmail, "role:", userRole);
-        setSession({
-          user: { id: 'backend-jwt-user', email: demoEmail, role: userRole, tenantId },
-          access_token: backendToken
-        });
-      }
+      const jwtSession = buildJwtSession();
+      if (jwtSession) setSession(jwtSession);
       setLoading(false);
       return;
     }
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      console.log("🔑 [ALEX IO] Auth Session resolved:", !!session);
-      setSession(session);
+    supabase.auth.getSession().then(({ data: { session: supabaseSession } }) => {
+      if (supabaseSession) {
+        // Google OAuth session
+        console.log("🔑 [ALEX IO] Supabase OAuth session active");
+        setSession(supabaseSession);
+      } else {
+        // No Supabase session — check for our own JWT (email/password login)
+        const jwtSession = buildJwtSession();
+        if (jwtSession) {
+          setSession(jwtSession);
+        } else {
+          console.log("⚠️ [ALEX IO] No active session found");
+          setSession(null);
+        }
+      }
       setLoading(false);
     }).catch(err => {
       console.error("❌ [ALEX IO] Auth Check Failure:", err);
+      // On error, still try JWT fallback
+      const jwtSession = buildJwtSession();
+      if (jwtSession) setSession(jwtSession);
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
+      if (newSession) {
+        setSession(newSession);
+      }
+      // Don't clear JWT session on Supabase state changes if no new session
     });
 
     return () => subscription.unsubscribe();
