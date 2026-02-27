@@ -18,6 +18,7 @@ const sessionStatus = new Map();
 const reconnectAttempts = new Map();
 const sessionsDir = './sessions';
 const sessionsTable = process.env.WHATSAPP_SESSIONS_TABLE || 'whatsapp_sessions';
+const usageTable = 'tenant_usage_metrics';
 const maxReconnectAttempts = Number(process.env.WHATSAPP_MAX_RECONNECT_ATTEMPTS || 5);
 const promptVersionsTable = process.env.PROMPT_VERSIONS_TABLE || 'prompt_versiones';
 const promptVersionsMemoryStore = new Map();
@@ -44,6 +45,13 @@ const updateSessionStatus = async (instanceId, status, extra = {}) => {
     });
 
     if (!isSupabaseEnabled) return;
+
+    // Phase 3: Add explicit tenant info to sessions if available in memory
+    const memoryConfig = clientConfigs.get(instanceId);
+    if (memoryConfig && memoryConfig.tenantId) {
+        payload.tenant_id = memoryConfig.tenantId;
+        payload.owner_email = memoryConfig.ownerEmail || null;
+    }
 
     const { provider, ...dbPayload } = payload;
     const { error } = await supabase
@@ -261,6 +269,21 @@ async function handleQRMessage(sock, msg, instanceId) {
         await sock.readMessages([msg.key]);
         await sock.sendPresenceUpdate('composing', remoteJid);
 
+        // Phase 3: Check Limits
+        const tenantId = config.tenantId;
+        let usage = { messages_sent: 0, plan_limit: 500 };
+
+        if (tenantId && isSupabaseEnabled) {
+            const { data } = await supabase.from(usageTable).select('*').eq('tenant_id', tenantId).single();
+            if (data) usage = data;
+
+            if (usage.messages_sent >= usage.plan_limit) {
+                await sock.sendMessage(remoteJid, { text: '¡El bot superó el límite de su plan! Contacte soporte para ampliar la capacidad o espere a la renovación.' });
+                console.log(`❌ [${config.companyName}] Límite superado. Plan limit: ${usage.plan_limit}`);
+                return;
+            }
+        }
+
         const result = await alexBrain.generateResponse({
             message: text,
             history: [],
@@ -273,6 +296,25 @@ async function handleQRMessage(sock, msg, instanceId) {
         if (result.text) {
             await sock.sendMessage(remoteJid, { text: result.text });
             console.log(`📤 [${config.companyName}] Respondido con ${result.trace.model}`);
+
+            if (tenantId && isSupabaseEnabled) {
+                // Increment Usage
+                const tokenUsage = result.trace.usage?.totalTokens || 150;
+                await supabase.rpc('increment_tenant_usage', {
+                    t_id: tenantId, msg_incr: 1, tk_incr: tokenUsage
+                }).then(({ error }) => {
+                    if (error) {
+                        // If RPC not created, fallback to normal upsert
+                        supabase.from(usageTable).upsert({
+                            tenant_id: tenantId,
+                            messages_sent: usage.messages_sent + 1,
+                            tokens_consumed: (usage.tokens_consumed || 0) + tokenUsage,
+                            plan_limit: usage.plan_limit,
+                            updated_at: new Date().toISOString()
+                        }).catch(() => { });
+                    }
+                });
+            }
         }
 
         // Send voice note if audio was generated
@@ -620,6 +662,91 @@ router.get('/status/:instanceId', (req, res) => {
         ...info,
         provider: info.provider || clientConfigs.get(instanceId)?.provider || 'baileys'
     });
+});
+
+// --- PHASE 3: METRICS AND RESTART RULES ---
+router.get('/usage', async (req, res) => {
+    try {
+        const tenantId = req.tenant?.id;
+        if (!tenantId || !isSupabaseEnabled) {
+            return res.json({ success: true, usage: { messages_sent: 0, plan_limit: 100, tokens_consumed: 0 } });
+        }
+
+        const { data, error } = await supabase.from(usageTable).select('*').eq('tenant_id', tenantId).single();
+        if (error && error.code !== 'PGRST116') throw error; // Allow completely missing rows
+
+        return res.json({
+            success: true,
+            usage: data || { messages_sent: 0, plan_limit: req.tenant.plan === 'ENTERPRISE' ? 10000 : (req.tenant.plan === 'PRO' ? 3000 : 500), tokens_consumed: 0 }
+        });
+    } catch (error) {
+        console.error('❌ Error getting usage:', error.message);
+        return res.status(500).json({ error: 'No se pudo obtener el uso de tokens.' });
+    }
+});
+
+router.post('/instance/:instanceId/restart', async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const tenantId = req.tenant?.id;
+        const config = clientConfigs.get(instanceId);
+
+        if (!config && req.tenant?.role !== 'SUPERADMIN') {
+            return res.status(404).json({ error: 'Instancia no encontrada o permisos insuficientes' });
+        }
+
+        if (activeSessions.has(instanceId)) {
+            try { activeSessions.get(instanceId).logout(); } catch (_) { }
+        }
+
+        clearSessionRuntime(instanceId);
+        try { fs.rmSync(`${sessionsDir}/${instanceId}`, { recursive: true, force: true }); } catch (_) { }
+
+        await updateSessionStatus(instanceId, 'restarting', { companyName: config?.companyName || 'Reinicio' });
+
+        if (config && config.provider === 'baileys') {
+            setTimeout(() => connectToWhatsApp(instanceId, config, null), 1500);
+        }
+
+        return res.json({ success: true, message: 'La sesión se ha reiniciado correctamente.' });
+    } catch (error) {
+        console.error('❌ Error restarting session:', error.message);
+        return res.status(500).json({ error: 'Fallo al reiniciar conector' });
+    }
+});
+
+router.get('/superadmin/clients', async (req, res) => {
+    if (req.tenant?.role !== 'SUPERADMIN') return res.status(403).json({ error: 'Acceso Denegado' });
+    if (!isSupabaseEnabled) return res.json({ clients: [] });
+
+    try {
+        // Fetch users using admin api if service role available, else rely on a view or standard table (app_users fallback)
+        // Since app_users has plan and role, we pull them.
+        const { data: users } = await supabase.from('app_users').select('id, email, plan, role');
+        const { data: usage } = await supabase.from(usageTable).select('*');
+        const { data: bots } = await supabase.from(sessionsTable).select('instance_id, tenant_id, status, company_name');
+
+        const allUsers = users || [];
+        const clients = allUsers.map(u => {
+            const tId = `tenant_${Buffer.from(u.email).toString('base64').substring(0, 8)}`;
+            const userUsage = (usage || []).find(us => us.tenant_id === tId || us.tenant_id === u.id) || { messages_sent: 0, plan_limit: 0, tokens_consumed: 0 };
+            const userBots = (bots || []).filter(b => b.tenant_id === tId || b.tenant_id === u.id);
+            return {
+                id: u.id,
+                tenant_id: tId,
+                email: u.email,
+                plan: u.plan,
+                role: u.role,
+                usage: userUsage,
+                bots: userBots
+            };
+        });
+
+        return res.json({ success: true, clients });
+    } catch (e) {
+        console.error('❌ Error superadmin endpoints:', e.message);
+        return res.status(500).json({ error: e.message });
+    }
 });
 
 // --- GENERATE PROMPT VIA AI ---

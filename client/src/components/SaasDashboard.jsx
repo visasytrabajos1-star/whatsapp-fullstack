@@ -62,6 +62,7 @@ function SaasDashboard() {
   const [selected, setSelected] = useState(null);
   const [showNewBotModal, setShowNewBotModal] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [usage, setUsage] = useState({ messages_sent: 0, plan_limit: 500, tokens_consumed: 0 });
   const [promptVersions, setPromptVersions] = useState([]);
   const [loadingPromptVersions, setLoadingPromptVersions] = useState(false);
   const [promotingVersionId, setPromotingVersionId] = useState(null);
@@ -115,6 +116,18 @@ function SaasDashboard() {
     } finally {
       setLoadingInstances(false);
     }
+
+    try {
+      const { response: useRes, data: useData } = await fetchJsonWithApiFallback('/api/saas/usage', {
+        timeoutMs: 15000,
+        headers: { ...getAuthHeaders() }
+      });
+      if (useRes.ok && useData.usage) {
+        setUsage(useData.usage);
+      }
+    } catch (e) {
+      console.error("Error fetching usage:", e);
+    }
   };
 
   useEffect(() => {
@@ -144,6 +157,22 @@ function SaasDashboard() {
       if (byStatus !== 0) return byStatus;
       return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
+  };
+
+  const handleRestartInstance = async () => {
+    if (!selected?.instanceId) return;
+    try {
+      pushNotice('warning', 'Reiniciando el conector. Espera unos segundos...');
+      await fetchJsonWithApiFallback(`/api/saas/instance/${selected.instanceId}/restart`, {
+        method: 'POST',
+        timeoutMs: 30000,
+        headers: { ...getAuthHeaders() }
+      });
+      pushNotice('success', 'Comando de reinicio enviado correctamente.');
+      setTimeout(fetchInstances, 2000);
+    } catch (error) {
+      pushNotice('error', error.message || 'Fallo al reiniciar.');
+    }
   };
 
   const waitForQr = (instanceId) => new Promise((resolve, reject) => {
@@ -461,9 +490,22 @@ function SaasDashboard() {
       )}
 
       <main className="flex h-[calc(100vh-64px)]">
-        <aside className="w-64 bg-slate-950 border-r border-slate-800 p-4">
+        <aside className="w-64 bg-slate-950 border-r border-slate-800 p-4 flex flex-col">
+          <div className="mb-6 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg shadow-blue-900/5">
+            <h2 className="text-[10px] font-bold uppercase text-slate-500 tracking-widest flex justify-between items-center mb-2">
+              Uso del Plan
+              <span className="text-blue-400">{usage.messages_sent} / {usage.plan_limit}</span>
+            </h2>
+            <div className="w-full bg-slate-800 rounded-full h-1.5 mb-2 overflow-hidden">
+              <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${Math.min((usage.messages_sent / Math.max(usage.plan_limit, 1)) * 100, 100)}%` }}></div>
+            </div>
+            <p className="text-[10px] text-slate-400 text-right">
+              {usage.tokens_consumed ? `${(usage.tokens_consumed / 1000).toFixed(1)}k tokens` : '0 tokens'}
+            </p>
+          </div>
+
           <h2 className="text-xs font-bold uppercase text-slate-500 tracking-widest mb-4">Mis Bots</h2>
-          <div className="space-y-2">
+          <div className="space-y-2 flex-1 overflow-auto">
             {instances.map((inst) => (
               <button key={inst.id} onClick={() => setSelected(inst)} className={`w-full text-left p-3 rounded-lg flex items-center justify-between ${selected?.id === inst.id ? 'bg-blue-600' : 'bg-slate-900 hover:bg-slate-800'}`}>
                 <div>
@@ -477,7 +519,7 @@ function SaasDashboard() {
           <button
             onClick={() => setShowNewBotModal(true)}
             disabled={connecting}
-            className="w-full mt-4 py-2 border border-dashed border-slate-700 text-slate-500 rounded-lg hover:border-blue-500 hover:text-blue-500 flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full mt-4 py-2 border border-dashed border-slate-700 text-slate-500 rounded-lg hover:border-blue-500 hover:text-blue-500 flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
           >
             {connecting ? <Loader className="animate-spin" size={16} /> : <Plus size={16} />} <span>Nuevo Bot</span>
           </button>
@@ -605,11 +647,19 @@ function SaasDashboard() {
                         ))}
                       </div>
                     )}
-                    <div className="mt-6 pt-4 border-t border-slate-800">
-                      <p className="text-slate-500 text-[10px] flex items-center justify-between">
-                        <span>Canal: {providerLabel}</span>
-                        <span className="text-blue-400 uppercase tracking-tighter">Estado: {selected.status || 'desconocido'}</span>
-                      </p>
+                    <div className="mt-6 pt-4 border-t border-slate-800 flex justify-between items-end">
+                      <div className="flex flex-col gap-1">
+                        <p className="text-slate-500 text-[10px] flex items-center gap-3">
+                          <span>Canal: {providerLabel}</span>
+                          <span className="text-blue-400 uppercase tracking-tighter">Estado: {selected.status || 'desconocido'}</span>
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleRestartInstance}
+                        className="text-[10px] bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest"
+                      >
+                        Reiniciar Conector
+                      </button>
                     </div>
                   </div>
                 </div>
