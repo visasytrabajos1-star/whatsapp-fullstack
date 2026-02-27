@@ -19,11 +19,12 @@ const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
 const openai = OPENAI_KEY ? new OpenAI({ apiKey: OPENAI_KEY }) : null;
 
 // Log available providers on startup
-console.log(`🧠 AI Providers: Gemini=${!!genAI} | DeepSeek=${!!DEEPSEEK_KEY} | Claude=${!!ANTHROPIC_KEY} | OpenAI=${!!openai}`);
+console.log(`🧠 AI Providers: Gemini=${!!genAI} | OpenAI(TTS)=${!!openai} | DeepSeek=${!!DEEPSEEK_KEY} | Claude=${!!ANTHROPIC_KEY}`);
 
 /**
- * Generates a response using the available AI providers (Gemini -> DeepSeek -> OpenAI -> Safeguard)
- * and optionally converts the result to speech if OpenAI is available.
+ * ARQUITECTURA DE IA:
+ *   TEXTO  → Gemini (principal) → DeepSeek → Claude → GPT-4o-mini → Safeguard
+ *   VOZ    → OpenAI TTS-1 (siempre, si hay key)
  */
 async function generateResponse({ message, history = [], botConfig = {} }) {
     const botName = botConfig.bot_name || 'ALEX IO';
@@ -37,22 +38,10 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
     let responseText = '';
     let usedModel = '';
 
-    // 2. Primary: OpenAI (ChatGPT-4o-mini)
-    if (openai) {
-        try {
-            const gptRes = await openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                messages: [{ role: 'system', content: systemPrompt }, ...history.slice(-6), { role: 'user', content: message }]
-            });
-            responseText = gptRes.choices[0].message.content;
-            usedModel = 'gpt-4o-mini';
-        } catch (err) {
-            console.warn('⚠️ OpenAI error:', err.message);
-        }
-    }
-
-    // 3. Fallback: Gemini (Multimodal & Fast)
-    if (!responseText && genAI) {
+    // ═══════════════════════════════════════════════
+    // 2. TEXTO — Principal: GEMINI
+    // ═══════════════════════════════════════════════
+    if (genAI) {
         const geminiModels = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro', 'gemini-pro'];
         for (const modelName of geminiModels) {
             try {
@@ -64,14 +53,14 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                 const result = await chat.sendMessage([{ text: `${systemPrompt}\n\nUsuario: ${message}` }]);
                 responseText = result.response.text();
                 usedModel = modelName;
-                break; // Success, stop trying models
+                break;
             } catch (err) {
                 console.warn(`⚠️ Gemini ${modelName} error:`, err.message);
             }
         }
     }
 
-    // 3. Fallback: DeepSeek
+    // 3. Fallback texto: DeepSeek
     if (!responseText && DEEPSEEK_KEY) {
         try {
             const dsRes = await axios.post('https://api.deepseek.com/v1/chat/completions', {
@@ -85,7 +74,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         }
     }
 
-    // 4. Fallback: Claude (Anthropic)
+    // 4. Fallback texto: Claude
     if (!responseText && ANTHROPIC_KEY) {
         try {
             const claudeMessages = [
@@ -93,16 +82,9 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                 { role: 'user', content: message }
             ];
             const claudeRes = await axios.post('https://api.anthropic.com/v1/messages', {
-                model: ANTHROPIC_MODEL,
-                max_tokens: 500,
-                system: systemPrompt,
-                messages: claudeMessages
+                model: ANTHROPIC_MODEL, max_tokens: 500, system: systemPrompt, messages: claudeMessages
             }, {
-                headers: {
-                    'x-api-key': ANTHROPIC_KEY,
-                    'anthropic-version': '2023-06-01',
-                    'content-type': 'application/json'
-                },
+                headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
                 timeout: 15000
             });
             const claudeContent = claudeRes.data?.content;
@@ -115,9 +97,21 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         }
     }
 
-    // 5. Fallback is now handled by Claude/DeepSeek above
+    // 5. Fallback texto: GPT-4o-mini (último recurso para texto)
+    if (!responseText && openai) {
+        try {
+            const gptRes = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                messages: [{ role: 'system', content: systemPrompt }, ...history.slice(-6), { role: 'user', content: message }]
+            });
+            responseText = gptRes.choices[0].message.content;
+            usedModel = 'gpt-4o-mini';
+        } catch (err) {
+            console.warn('⚠️ OpenAI text error:', err.message);
+        }
+    }
 
-    // 6. Final Safeguard (No loop)
+    // 6. Safeguard
     if (!responseText) {
         responseText = '¡Hola! Parece que mi conexión a la IA está un poco lenta. ¿Podrías repetirme tu mensaje? Estoy aquí para ayudarte.';
         usedModel = 'safeguard';
@@ -128,21 +122,22 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         trace: { model: usedModel, timestamp: new Date().toISOString() }
     };
 
-    // 7. TTS — OpenAI con formato Opus (OGG nativo, 100% compatible con WhatsApp PTT)
-    // Se ejecuta solo si gpt generó texto y openai está disponible
+    // ═══════════════════════════════════════════════
+    // 7. VOZ — SIEMPRE ChatGPT OpenAI TTS
+    // ═══════════════════════════════════════════════
     if (openai && responseText && usedModel !== 'safeguard') {
         try {
             const opusAudio = await openai.audio.speech.create({
                 model: 'tts-1',
                 voice: 'nova',
                 input: responseText.slice(0, 4000),
-                response_format: 'opus' // devuelve OGG/Opus — formato nativo de WhatsApp
+                response_format: 'opus'
             });
             result.audioBuffer = Buffer.from(await opusAudio.arrayBuffer());
             result.audioMime = 'audio/ogg; codecs=opus';
-            console.log('🎙️ TTS generado (OpenAI Opus/OGG)');
+            console.log('🎙️ TTS generado por OpenAI (Opus/OGG)');
         } catch (err) {
-            console.error('❌ TTS OpenAI Opus Error:', err.message);
+            console.error('❌ TTS OpenAI Error:', err.message);
         }
     }
 

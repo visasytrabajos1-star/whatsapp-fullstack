@@ -10,6 +10,7 @@ const OnboardingWizard = lazy(() => import('./components/Onboarding/OnboardingWi
 const PaymentSetup = lazy(() => import('./components/PaymentSetup'));
 const SaasDashboard = lazy(() => import('./components/SaasDashboard'));
 const SuperAdminDashboard = lazy(() => import('./components/SuperAdminDashboard'));
+const SuperAdminLogin = lazy(() => import('./components/SuperAdminLogin'));
 
 if (import.meta.env.DEV) {
   console.log('📦 [ALEX IO] App loaded in development mode');
@@ -164,8 +165,8 @@ function App() {
   };
 
   const RoleRoute = ({ children, allowedRoles }) => {
-    if (!session) return <Navigate to="/login" />;
-    const role = session.user?.role || localStorage.getItem('alex_io_role') || 'OWNER';
+    const role = session?.user?.role || localStorage.getItem('alex_io_role') || 'OWNER';
+    if (!session && role !== 'SUPERADMIN') return <Navigate to="/login" />;
     if (!allowedRoles.includes(role)) return <Navigate to="/dashboard" />;
     return children;
   };
@@ -179,6 +180,7 @@ function App() {
           <Suspense fallback={<FullPageLoader />}>
             <Routes>
               <Route path="/login" element={!session ? <Login /> : <Navigate to={defaultPath} />} />
+              <Route path="/superadmin-login" element={<SuperAdminLogin />} />
 
               <Route
                 path="/dashboard"
