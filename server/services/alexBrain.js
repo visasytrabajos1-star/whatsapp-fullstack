@@ -4,6 +4,10 @@ const NodeCache = require('node-cache');
 const crypto = require('crypto');
 const personas = require('../config/personas');
 
+// Circuit Breaker for expired keys
+const deadKeys = new Set();
+const KEY_COOLDOWN_MS = 3600000; // 1 hour
+
 // --- CONSTANTS ---
 const GEMINI_KEY = (process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY || process.env.GOOGLE_API_KEY || "").trim();
 const OPENAI_KEY = (process.env.OPENAI_API_KEY || "").trim();
@@ -45,7 +49,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
     const normalizedUserMsg = String(message || "").trim();
 
     // 1. GEMINI (AXIOS implementation for stability)
-    if (GEMINI_KEY && GEMINI_KEY.length > 20) {
+    if (GEMINI_KEY && GEMINI_KEY.length > 20 && !deadKeys.has('GEMINI')) {
         // Try multiple Gemini versions/models
         const gems = [
             { v: 'v1beta', m: 'gemini-2.0-flash-exp' }, // Try experimental if latest fails
@@ -71,7 +75,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                 };
                 if (g.v === 'v1beta') payload.system_instruction = { parts: [{ text: systemPrompt }] };
 
-                const res = await axios.post(url, payload, { timeout: 8000 });
+                const res = await axios.post(url, payload, { timeout: 6000 });
                 if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
                     responseText = res.data.candidates[0].content.parts[0].text;
                     usedModel = g.m;
@@ -83,18 +87,22 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                 console.warn(`⚠️ [${botName}] ${g.m} falló (${statusCode}):`, errorMsg);
 
                 // If quota exceeded (429) or model not found (404), try next model in list
-                // If it's a 429 specifically for the project, the break will depend on strategy
                 if (statusCode === 429 && errorMsg.includes('quota')) {
-                    // If quota is per model, we continue. If per project, we might want to break gems loop
-                    // In this case, we'll try the next model just in case quotas are separate
                     continue;
+                }
+
+                if (statusCode === 400 && (errorMsg.includes('expired') || errorMsg.includes('API key'))) {
+                    console.error(`🛑 [${botName}] Gemini API Key EXPIRED. Disabling for 1 hour.`);
+                    deadKeys.add('GEMINI');
+                    setTimeout(() => deadKeys.delete('GEMINI'), KEY_COOLDOWN_MS);
+                    break;
                 }
             }
         }
     }
 
     // 2. DEEPSEEK FALLBACK (If configured and Gemini failed)
-    if (!responseText && DEEPSEEK_KEY) {
+    if (!responseText && DEEPSEEK_KEY && !deadKeys.has('DEEPSEEK')) {
         try {
             console.log(`🚀 [${botName}] Fallback extra: DeepSeek...`);
             const dsRes = await axios.post('https://api.deepseek.com/v1/chat/completions', {
@@ -104,17 +112,22 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                     ...(history || []).slice(-6).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content || h.text })),
                     { role: 'user', content: normalizedUserMsg }
                 ]
-            }, { headers: { Authorization: `Bearer ${DEEPSEEK_KEY}` }, timeout: 10000 });
+            }, { headers: { Authorization: `Bearer ${DEEPSEEK_KEY}` }, timeout: 7000 });
 
             responseText = dsRes.data.choices[0].message.content;
             usedModel = 'deepseek-chat';
         } catch (err) {
-            console.warn(`⚠️ [${botName}] DeepSeek Fallback Error:`, err.response?.data?.error?.message || err.message);
+            const errorMsg = err.response?.data?.error?.message || err.message;
+            console.warn(`⚠️ [${botName}] DeepSeek Fallback Error:`, errorMsg);
+            if (errorMsg.includes('Balance') || errorMsg.includes('API key')) {
+                deadKeys.add('DEEPSEEK');
+                setTimeout(() => deadKeys.delete('DEEPSEEK'), KEY_COOLDOWN_MS);
+            }
         }
     }
 
     // 3. OPENAI FALLBACK (Secondary)
-    if (!responseText && OPENAI_KEY) {
+    if (!responseText && OPENAI_KEY && !deadKeys.has('OPENAI')) {
         try {
             console.log(`🚀 [${botName}] Fallback: GPT-4o-mini...`);
             const completion = await axios.post('https://api.openai.com/v1/chat/completions', {
@@ -124,12 +137,17 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                     ...(history || []).slice(-6).map(h => ({ role: h.role === 'assistant' ? 'assistant' : 'user', content: h.content || h.text })),
                     { role: 'user', content: normalizedUserMsg }
                 ]
-            }, { headers: { Authorization: `Bearer ${OPENAI_KEY}` }, timeout: 12000 });
+            }, { headers: { Authorization: `Bearer ${OPENAI_KEY}` }, timeout: 8000 });
 
             responseText = completion.data.choices[0].message.content;
             usedModel = 'gpt-4o-mini';
         } catch (err) {
-            console.error(`❌ [${botName}] OpenAI Error:`, err.response?.data?.error?.message || err.message);
+            const errorMsg = err.response?.data?.error?.message || err.message;
+            console.error(`❌ [${botName}] OpenAI Error:`, errorMsg);
+            if (errorMsg.includes('expired') || errorMsg.includes('Insufficient')) {
+                deadKeys.add('OPENAI');
+                setTimeout(() => deadKeys.delete('OPENAI'), KEY_COOLDOWN_MS);
+            }
         }
     }
 
@@ -144,7 +162,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         trace: { model: usedModel, timestamp: new Date().toISOString() }
     };
 
-    // 4. VOZ (SIEMPRE SI HAY OPENAI KEY)
+    // 4. VOZ (RE-ENABLED)
     if (openai && responseText) {
         try {
             console.log(`🎙️ [${botName}] Generando Audio PTT...`);

@@ -1,7 +1,11 @@
 const jwt = require('jsonwebtoken');
 const { supabase, isSupabaseEnabled } = require('../services/supabaseClient');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'alex_io_ultra_secure_default_secret_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: JWT_SECRET must be defined in production environment');
+}
 
 /**
  * Middleware para validar el token JWT y extraer el tenantId.
@@ -21,8 +25,9 @@ const authenticateTenant = async (req, res, next) => {
     try {
         const unverified = jwt.decode(token);
 
-        // 1. Check if it's a bypass token first
-        if (token === 'master-superadmin-token-bypass') {
+        // 1. Check if it's a bypass token first (Only in non-production)
+        const isDev = process.env.NODE_ENV !== 'production';
+        if (isDev && token === 'master-superadmin-token-bypass') {
             req.tenant = {
                 id: 'tenant_superadmin',
                 plan: 'ENTERPRISE',

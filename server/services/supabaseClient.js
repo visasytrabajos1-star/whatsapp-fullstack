@@ -1,10 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const SUPABASE_URL_FALLBACK = 'https://ygsmooajrqldzdtcukfd.supabase.co';
-const SUPABASE_ANON_KEY_FALLBACK = 'sb_publishable_X3xx0LH-LOLJf7q5M52yVQ_JUq3AzT8';
-
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || SUPABASE_URL_FALLBACK;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY || SUPABASE_ANON_KEY_FALLBACK;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
 let supabase = null;
 
