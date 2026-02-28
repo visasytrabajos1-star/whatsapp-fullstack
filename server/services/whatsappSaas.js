@@ -132,7 +132,7 @@ async function handleQRMessage(sock, msg, instanceId) {
     if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@newsletter')) return;
 
     // Ignorar mensajes de grupos para evitar loops y consumo excesivo (Configurable)
-    const ignoreGroups = process.env.WHATSAPP_IGNORE_GROUPS === 'true' || true; // Por defecto ignorar en esta versión
+    const ignoreGroups = process.env.WHATSAPP_IGNORE_GROUPS !== 'false'; // Por defecto true, permite 'false' para activar
     if (ignoreGroups && remoteJid.endsWith('@g.us')) {
         return;
     }

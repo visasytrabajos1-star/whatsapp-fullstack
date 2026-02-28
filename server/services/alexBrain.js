@@ -162,7 +162,8 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         trace: { model: usedModel, timestamp: new Date().toISOString() }
     };
 
-    // 4. VOZ (SIEMPRE SI HAY OPENAI KEY)
+    // 4. VOZ (DISABLED BY REQUEST)
+    /*
     if (openai && responseText) {
         try {
             console.log(`🎙️ [${botName}] Generando Audio PTT...`);
@@ -179,6 +180,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
             console.error(`❌ [${botName}] TTS Error:`, err.message);
         }
     }
+    */
 
     global.responseCache.set(cacheKey, result);
     return result;
