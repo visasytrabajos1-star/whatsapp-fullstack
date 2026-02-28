@@ -72,6 +72,7 @@ function SaasDashboard() {
     name: '',
     provider: 'baileys',
     customPrompt: 'Eres un asistente virtual amigable y profesional.',
+    voice: 'nova',
     metaApiUrl: '',
     metaPhoneNumberId: '',
     metaAccessToken: '',
@@ -136,6 +137,7 @@ function SaasDashboard() {
       name: selected.name || '',
       provider: selected.provider || 'baileys',
       customPrompt: selected.customPrompt || 'Eres un asistente virtual amigable y profesional.',
+      voice: selected.voice || 'nova',
       metaApiUrl: selected.metaApiUrl || '',
       metaPhoneNumberId: selected.metaPhoneNumberId || '',
       metaAccessToken: selected.metaAccessToken || '',
@@ -168,7 +170,17 @@ function SaasDashboard() {
         timeoutMs: 30000,
         headers: { ...getAuthHeaders() }
       });
-      pushNotice('success', 'Comando de reinicio enviado correctamente.');
+      pushNotice('success', 'Sesión reiniciada. Generando nuevo código QR...');
+
+      if (selected.provider === 'baileys') {
+        const result = await waitForQr(selected.instanceId);
+        if (result.type === 'qr') {
+          setQrCode(result.value);
+          pushNotice('success', 'Nuevo QR generado. Escanéalo para reconectar el bot sin perder la memoria.');
+        } else if (result.type === 'online') {
+          pushNotice('success', 'El bot se reconectó automáticamente.');
+        }
+      }
       setTimeout(fetchInstances, 2000);
     } catch (error) {
       pushNotice('error', error.message || 'Fallo al reiniciar.');
@@ -251,6 +263,7 @@ function SaasDashboard() {
         name,
         provider,
         customPrompt: `Eres un asistente virtual de ${name}`,
+        voice: 'nova',
         super_prompt_json: null,
         metaApiUrl: '',
         metaPhoneNumberId: '',
@@ -540,6 +553,18 @@ function SaasDashboard() {
                     <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp (QR o Cloud)</label>
                     <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
                       {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Voz del Bot (IA)</label>
+                    <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.voice || 'nova'} onChange={(e) => setConfigDraft((prev) => ({ ...prev, voice: e.target.value }))}>
+                      <option value="nova">Nova (Femenina - Natural)</option>
+                      <option value="onyx">Onyx (Masculina - Profunda)</option>
+                      <option value="fable">Fable (Masculina - Animada)</option>
+                      <option value="alloy">Alloy (Andrógina - Directa)</option>
+                      <option value="echo">Echo (Masculina - Suave)</option>
+                      <option value="shimmer">Shimmer (Femenina - Clara)</option>
                     </select>
                   </div>
 

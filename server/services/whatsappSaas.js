@@ -9,12 +9,12 @@ const express = require('express');
 const router = express.Router();
 const alexBrain = require('./alexBrain');
 const { supabase, isSupabaseEnabled } = require('./supabaseClient');
-const { 
-    savePromptVersion, 
-    listPromptVersions, 
-    promotePromptVersion, 
-    archivePromptVersion, 
-    allowedPromptStatuses 
+const {
+    savePromptVersion,
+    listPromptVersions,
+    promotePromptVersion,
+    archivePromptVersion,
+    allowedPromptStatuses
 } = require('./promptService');
 
 // Session Management
@@ -372,7 +372,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 
 // --- ENDPOINTS ---
 router.post('/connect', async (req, res) => {
-    const { companyName, customPrompt, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
+    const { companyName, customPrompt, voice, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
     const cleanName = String(companyName || '').trim();
 
     if (!cleanName) {
@@ -384,6 +384,7 @@ router.post('/connect', async (req, res) => {
     const config = {
         companyName: cleanName,
         customPrompt,
+        voice: voice || 'nova',
         provider,
         tenantId,
         ownerEmail: req.tenant?.email || '',

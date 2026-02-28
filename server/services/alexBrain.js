@@ -95,7 +95,7 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
                     console.error(`🛑 [${botName}] Gemini API Key EXPIRED. Disabling for 1 hour.`);
                     deadKeys.add('GEMINI');
                     setTimeout(() => deadKeys.delete('GEMINI'), KEY_COOLDOWN_MS);
-                    break; 
+                    break;
                 }
             }
         }
@@ -165,10 +165,10 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
     // 4. VOZ (RE-ENABLED)
     if (openai && responseText) {
         try {
-            console.log(`🎙️ [${botName}] Generando Audio PTT...`);
+            console.log(`🎙️ [${botName}] Generando Audio PTT (${botConfig.voice || 'nova'})...`);
             const mp3 = await openai.audio.speech.create({
                 model: 'tts-1',
-                voice: 'nova',
+                voice: botConfig.voice || 'nova',
                 input: responseText.slice(0, 3500),
                 response_format: 'opus'
             });
