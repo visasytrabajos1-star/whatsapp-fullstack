@@ -157,9 +157,20 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         usedModel = 'safeguard';
     }
 
+    // Detect Intent (Simple heuristic for now, can be LLM based)
+    let intent = 'general';
+    const lowerText = responseText.toLowerCase();
+    if (lowerText.includes('precio') || lowerText.includes('costo') || lowerText.includes('comprar') || lowerText.includes('plan')) intent = 'sales';
+    else if (lowerText.includes('ayuda') || lowerText.includes('soporte') || lowerText.includes('error') || lowerText.includes('falla')) intent = 'support';
+    else if (lowerText.includes('hola') || lowerText.includes('buenos')) intent = 'greeting';
+
     const result = {
         text: responseText,
-        trace: { model: usedModel, timestamp: new Date().toISOString() }
+        trace: {
+            model: usedModel,
+            intent,
+            timestamp: new Date().toISOString()
+        }
     };
 
     // 4. VOZ (RE-ENABLED)

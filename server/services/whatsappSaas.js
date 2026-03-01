@@ -8,6 +8,8 @@ const pino = require('pino');
 const express = require('express');
 const router = express.Router();
 const alexBrain = require('./alexBrain');
+const useSupabaseAuthState = require('./supabaseAuthState');
+const copperService = require('./copperService');
 const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 const {
     savePromptVersion,
@@ -187,6 +189,12 @@ async function handleQRMessage(sock, msg, instanceId) {
                 message_type: 'text',
                 status: 'received'
             }).catch(e => console.warn('⚠️ Log inbound failed:', e.message));
+
+            // CRM Sync: Try to identify and sync user to Copper
+            const cleanPhone = remoteJid.split('@')[0];
+            copperService.syncUser(cleanPhone, null, null)
+                .then(p => p && console.log(`👤 CRM Sync Success: ${p.name}`))
+                .catch(e => console.warn('⚠️ CRM Sync failed:', e.message));
         }
 
         const result = await alexBrain.generateResponse({
@@ -215,6 +223,7 @@ async function handleQRMessage(sock, msg, instanceId) {
                     content: result.text,
                     message_type: 'text',
                     ai_model: result.trace?.model || 'unknown',
+                metadata: { intent: result.trace?.intent || 'general' },
                     status: 'sent'
                 }).catch(e => console.warn('⚠️ Log outbound failed:', e.message));
             }
@@ -265,7 +274,13 @@ async function connectToWhatsApp(instanceId, config, res = null) {
     const sessionPath = `${sessionsDir}/${instanceId}`;
     clientConfigs.set(instanceId, config);
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    let authState;
+    if (isSupabaseEnabled && process.env.WHATSAPP_USE_SUPABASE_AUTH === 'true') {
+        authState = await useSupabaseAuthState(supabase, instanceId);
+    } else {
+        authState = await useMultiFileAuthState(sessionPath);
+    }
+    const { state, saveCreds } = authState;
 
     // Fetch latest WhatsApp Web version to avoid 405 errors
     let version;
@@ -958,8 +973,9 @@ const restoreSessions = async () => {
         for (const session of onlineSessions || []) {
             const instanceId = session.instance_id;
             const sessionPath = `${sessionsDir}/${instanceId}`;
+            const useSupabaseAuth = process.env.WHATSAPP_USE_SUPABASE_AUTH === 'true';
 
-            if (fs.existsSync(sessionPath)) {
+            if (fs.existsSync(sessionPath) || useSupabaseAuth) {
                 console.log(`✅ [RECOVERY] Restaurando bot: ${session.company_name} (${instanceId})`);
                 const config = {
                     companyName: session.company_name,
@@ -971,7 +987,7 @@ const restoreSessions = async () => {
                     console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, e.message);
                 });
             } else {
-                console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Carpeta de sesión no encontrada.`);
+                console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Sesión no encontrada localmente y Supabase Auth desactivado.`);
                 updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).catch(() => { });
             }
         }

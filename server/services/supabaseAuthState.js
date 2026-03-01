@@ -5,7 +5,7 @@ const { BufferJSON, initAuthCreds } = require('@whiskeysockets/baileys');
  * Custom Auth Adapter for Supabase
  * Stores WhatsApp session keys in a 'whatsapp_sessions' table.
  */
-const useSupabaseAuthState = async (supabase) => {
+const useSupabaseAuthState = async (supabase, instanceId = 'main_session') => {
 
     // 1. Fetch existing creds
     const readData = async (type, id) => {
@@ -13,7 +13,7 @@ const useSupabaseAuthState = async (supabase) => {
             const { data, error } = await supabase
                 .from('whatsapp_sessions')
                 .select('value')
-                .eq('session_id', 'main_session') // We use a single constant ID for now
+                .eq('session_id', instanceId)
                 .eq('key_type', type)
                 .eq('key_id', id)
                 .single();
@@ -36,7 +36,7 @@ const useSupabaseAuthState = async (supabase) => {
 
                 if (value) {
                     updates.push({
-                        session_id: 'main_session',
+                        session_id: instanceId,
                         key_type: keyType,
                         key_id: keyId,
                         value: JSON.stringify(value, BufferJSON.replacer)
@@ -46,7 +46,7 @@ const useSupabaseAuthState = async (supabase) => {
                     await supabase
                         .from('whatsapp_sessions')
                         .delete()
-                        .eq('session_id', 'main_session')
+                        .eq('session_id', instanceId)
                         .eq('key_type', keyType)
                         .eq('key_id', keyId);
                 }
