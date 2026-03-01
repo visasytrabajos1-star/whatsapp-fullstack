@@ -715,6 +715,33 @@ router.get('/analytics', async (req, res) => {
     }
 });
 
+router.post('/support/chat', async (req, res) => {
+    try {
+        const { message, history = [] } = req.body;
+        if (!message) return res.status(400).json({ error: 'Mensaje requerido' });
+
+        const result = await alexBrain.generateResponse({
+            message,
+            history: history.slice(-6),
+            botConfig: {
+                bot_name: 'ALEX IO Support',
+                system_prompt: `Eres Alex Support, el asistente de IA experto de la plataforma ALEX IO SaaS.
+                Tu misión es ayudar a los usuarios (dueños de negocios) con temas técnicos y operativos:
+                - Cómo conectar WhatsApp vía QR.
+                - Configuración de CRM (Copper).
+                - Gestión de prompts y versiones.
+                - Límites de planes (Starter, Pro, Enterprise).
+                - Fallos de conexión o reconexión del bot.
+                Responde de forma profesional, clara y concisa en español.`
+            }
+        });
+
+        res.json({ success: true, text: result.text, model: result.trace.model });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 router.get('/superadmin/clients', async (req, res) => {
     if (req.tenant?.role !== 'SUPERADMIN') return res.status(403).json({ error: 'Acceso Denegado' });
     if (!isSupabaseEnabled) return res.json({ clients: [] });

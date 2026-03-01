@@ -23,7 +23,8 @@ router.post('/stripe/checkout', async (req, res) => {
             email,
             priceId,
             `${process.env.FRONTEND_URL}/success?session_id={CHECKOUT_SESSION_ID}`,
-            `${process.env.FRONTEND_URL}/pricing`
+            `${process.env.FRONTEND_URL}/pricing`,
+            { email, plan, tenantId: req.tenant?.id }
         );
 
         res.json({ url: session.url });
@@ -48,13 +49,8 @@ router.post('/stripe/webhook', express.raw({type: 'application/json'}), async (r
             case 'checkout.session.completed':
                 console.log('✅ Pago completado:', email);
                 if (isSupabaseEnabled && email) {
-                    // Update user plan based on metadata or price
-                    const planMap = {
-                        [process.env.STRIPE_PRICE_STARTER]: 'STARTER',
-                        [process.env.STRIPE_PRICE_PRO]: 'PRO',
-                        [process.env.STRIPE_PRICE_ENTERPRISE]: 'ENTERPRISE'
-                    };
-                    const plan = planMap[session.line_items?.[0]?.price?.id] || 'PRO';
+                    // Use metadata from session to identify plan
+                    const plan = session.metadata?.plan || 'PRO';
                     const limit = plan === 'ENTERPRISE' ? 10000 : (plan === 'PRO' ? 3000 : 1000);
 
                     await supabase.from('app_users').update({ plan }).eq('email', email);

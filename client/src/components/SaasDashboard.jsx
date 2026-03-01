@@ -70,6 +70,10 @@ function SaasDashboard() {
   const [promotingVersionId, setPromotingVersionId] = useState(null);
   const [newBotName, setNewBotName] = useState('');
   const [newBotProvider, setNewBotProvider] = useState('baileys');
+  const [showSupport, setShowSupport] = useState(false);
+  const [supportChat, setSupportChat] = useState([]);
+  const [supportInput, setSupportInput] = useState('');
+  const [sendingSupport, setSendingSupport] = useState(false);
   const [configDraft, setConfigDraft] = useState({
     name: '',
     provider: 'baileys',
@@ -383,6 +387,31 @@ function SaasDashboard() {
       pushNotice('error', error.message || 'No se pudo archivar la versión.');
     } finally {
       setPromotingVersionId(null);
+    }
+  };
+
+  const handleSupportSend = async (e) => {
+    e?.preventDefault();
+    if (!supportInput.trim() || sendingSupport) return;
+
+    const userMsg = supportInput.trim();
+    setSupportInput('');
+    setSupportChat(prev => [...prev, { role: 'user', content: userMsg }]);
+    setSendingSupport(true);
+
+    try {
+      const { data } = await fetchJsonWithApiFallback('/api/saas/support/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+        body: JSON.stringify({ message: userMsg, history: supportChat })
+      });
+      if (data.text) {
+        setSupportChat(prev => [...prev, { role: 'assistant', content: data.text }]);
+      }
+    } catch (err) {
+      pushNotice('error', 'Error al conectar con soporte AI.');
+    } finally {
+      setSendingSupport(false);
     }
   };
 
@@ -745,6 +774,45 @@ function SaasDashboard() {
         <span className="text-blue-400 font-bold">{VERSION}</span>
         <span>Hardened | V8 Multi-Tenancy | API: {apiDebugUrl}</span>
       </footer>
+
+      {/* Floating Support Button */}
+      <button
+        onClick={() => setShowSupport(!showSupport)}
+        className="fixed bottom-6 right-6 w-12 h-12 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center shadow-xl z-50 transition-all hover:scale-110"
+      >
+        <MessageCircle size={24} className="text-white" />
+      </button>
+
+      {/* Support Chat Window */}
+      {showSupport && (
+        <div className="fixed bottom-20 right-6 w-80 h-[450px] bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl flex flex-col z-50 overflow-hidden">
+          <div className="bg-slate-900 p-4 border-b border-slate-700 flex justify-between items-center">
+            <h4 className="font-bold flex items-center gap-2 text-sm"><Shield size={16} className="text-blue-500" /> Soporte ALEX IO</h4>
+            <button onClick={() => setShowSupport(false)}><X size={16} className="text-slate-400" /></button>
+          </div>
+          <div className="flex-1 overflow-auto p-4 space-y-3">
+            {supportChat.length === 0 && (
+              <p className="text-xs text-slate-500 text-center py-4 italic">¡Hola! Soy tu asistente técnico de ALEX IO. ¿En qué puedo ayudarte hoy?</p>
+            )}
+            {supportChat.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] p-2 rounded-xl text-xs ${m.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-900 text-slate-300 border border-slate-700'}`}>
+                  {m.content}
+                </div>
+              </div>
+            ))}
+            {sendingSupport && <div className="flex justify-start"><div className="bg-slate-900 p-2 rounded-xl text-xs animate-pulse text-slate-500">Alex está escribiendo...</div></div>}
+          </div>
+          <form onSubmit={handleSupportSend} className="p-3 border-t border-slate-700 bg-slate-900">
+            <input
+              value={supportInput}
+              onChange={e => setSupportInput(e.target.value)}
+              placeholder="Escribe tu duda técnica..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2 text-xs outline-none focus:border-blue-500"
+            />
+          </form>
+        </div>
+      )}
 
       {showWizard && (
         <PromptWizard
