@@ -698,12 +698,23 @@ function SaasDashboard() {
                           <span className="text-blue-400 uppercase tracking-tighter">Estado: {selected.status || 'desconocido'}</span>
                         </p>
                       </div>
-                      <button
-                        onClick={handleRestartInstance}
-                        className="text-[10px] bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest"
-                      >
-                        Reiniciar Conector
-                      </button>
+                      <div className="flex gap-2">
+                        {(selected.status === 'disconnected' || String(selected.status).startsWith('fatal_') || String(selected.status).startsWith('failed_')) && providerLabel === 'Baileys (QR)' ? (
+                          <button
+                            onClick={handleRestartInstance}
+                            className="text-[10px] bg-blue-600 hover:bg-blue-500 text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest shadow-lg shadow-blue-500/20"
+                          >
+                            Generar Nuevo QR
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleRestartInstance}
+                            className="text-[10px] bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest"
+                          >
+                            Reiniciar Conector
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

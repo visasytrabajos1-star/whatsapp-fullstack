@@ -159,13 +159,24 @@ async function handleQRMessage(sock, msg, instanceId) {
     if (!text) return; // Ignore audio, stickers, docs for now if no text
 
     const config = clientConfigs.get(instanceId) || { companyName: 'ALEX IO' };
+    const tenantId = config.tenantId;
+
+    if (tenantId && isSupabaseEnabled) {
+        supabase.from('messages').insert({
+            instance_id: instanceId,
+            tenant_id: tenantId,
+            remote_jid: remoteJid,
+            direction: 'INBOUND',
+            message_type: 'text',
+            content: text
+        }).catch(err => console.warn(`⚠️ [${instanceId}] Error logging inbound message:`, err.message));
+    }
 
     try {
         await sock.readMessages([msg.key]);
         await sock.sendPresenceUpdate('composing', remoteJid);
 
         // Phase 3: Check Limits
-        const tenantId = config.tenantId;
         let usage = { messages_sent: 0, plan_limit: 500 };
 
         if (tenantId && isSupabaseEnabled) {
@@ -223,8 +234,18 @@ async function handleQRMessage(sock, msg, instanceId) {
             console.log(`✅ [${config.companyName}] Mensaje de texto enviado con éxito a: ${remoteJid} (ID: ${sentMsg?.key?.id})`);
 
             if (tenantId && isSupabaseEnabled) {
+                // Log outbound message
+                supabase.from('messages').insert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    remote_jid: remoteJid,
+                    direction: 'OUTBOUND',
+                    message_type: 'text',
+                    content: result.text
+                }).catch(() => null);
+
                 // Increment Usage
-                const tokenUsage = result.trace.usage?.totalTokens || 150;
+                const tokenUsage = result.trace?.usage?.totalTokens || 150;
                 await supabase.rpc('increment_tenant_usage', {
                     t_id: tenantId, msg_incr: 1, tk_incr: tokenUsage
                 }).then(({ error }) => {
@@ -254,6 +275,17 @@ async function handleQRMessage(sock, msg, instanceId) {
                     ptt: true // Send as voice note (push-to-talk style)
                 });
                 console.log(`🔊 [${config.companyName}] Audio enviado con éxito a: ${remoteJid} (ID: ${sentAudio?.key?.id})`);
+
+                if (tenantId && isSupabaseEnabled) {
+                    supabase.from('messages').insert({
+                        instance_id: instanceId,
+                        tenant_id: tenantId,
+                        remote_jid: remoteJid,
+                        direction: 'OUTBOUND',
+                        message_type: 'audio',
+                        content: '[Nota de Voz generada por IA]'
+                    }).catch(() => null);
+                }
             } catch (audioErr) {
                 console.warn(`⚠️ [${config.companyName}] No se pudo enviar audio:`, audioErr.message);
             }
@@ -666,11 +698,28 @@ router.get('/superadmin/clients', async (req, res) => {
     try {
         // Fetch users using admin api if service role available, else rely on a view or standard table (app_users fallback)
         // Since app_users has plan and role, we pull them.
-        const { data: users } = await supabase.from('app_users').select('id, email, plan, role');
+        // Merge profiles and app_users to catch old and new users
+        let mergedUsers = [];
+        try {
+            const { data: appUsers } = await supabase.from('app_users').select('id, email, plan, role');
+            if (appUsers) mergedUsers = [...appUsers];
+        } catch (_) { }
+
+        try {
+            const { data: profiles } = await supabase.from('profiles').select('id, email, plan, role');
+            if (profiles) {
+                profiles.forEach(p => {
+                    if (!mergedUsers.find(u => u.email === p.email)) {
+                        mergedUsers.push({ ...p, plan: p.plan || 'FREE', role: p.role || 'USER' });
+                    }
+                });
+            }
+        } catch (_) { }
+
         const { data: usage } = await supabase.from(usageTable).select('*');
         const { data: bots } = await supabase.from(sessionsTable).select('instance_id, tenant_id, status, company_name');
 
-        const allUsers = users || [];
+        const allUsers = mergedUsers;
         const clients = allUsers.map(u => {
             const tId = `tenant_${Buffer.from(u.email).toString('base64').substring(0, 8)}`;
             const userUsage = (usage || []).find(us => us.tenant_id === tId || us.tenant_id === u.id) || { messages_sent: 0, plan_limit: 0, tokens_consumed: 0 };

@@ -79,3 +79,19 @@ CREATE TABLE IF NOT EXISTS public.whatsapp_auth_state (
 
 -- Optimize index for querying a specific session
 CREATE INDEX IF NOT EXISTS idx_whatsapp_auth_state_instance ON public.whatsapp_auth_state (instance_id);
+
+-- 5. CREATE messages TABLE FOR AUDIT & ANALYTICS
+-- Stores incoming/outgoing chat history
+CREATE TABLE IF NOT EXISTS public.messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    instance_id TEXT NOT NULL,
+    tenant_id TEXT,
+    remote_jid TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (direction IN ('INBOUND', 'OUTBOUND')),
+    message_type TEXT NOT NULL DEFAULT 'text',
+    content TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_messages_instance_jid ON public.messages (instance_id, remote_jid);
+CREATE INDEX IF NOT EXISTS idx_messages_tenant ON public.messages (tenant_id);
