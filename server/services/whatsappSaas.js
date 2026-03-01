@@ -10,6 +10,7 @@ const router = express.Router();
 const alexBrain = require('./alexBrain');
 const useSupabaseAuthState = require('./supabaseAuthState');
 const copperService = require('./copperService');
+const templates = require('../config/templates');
 const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 const {
     savePromptVersion,
@@ -197,9 +198,30 @@ async function handleQRMessage(sock, msg, instanceId) {
                 .catch(e => console.warn('⚠️ CRM Sync failed:', e.message));
         }
 
+        // AI Memory: Fetch recent history from Supabase
+        let history = [];
+        if (isSupabaseEnabled) {
+            try {
+                const { data: recentMsgs } = await supabase
+                    .from('messages')
+                    .select('direction, content')
+                    .eq('customer_phone', remoteJid)
+                    .eq('instance_id', instanceId)
+                    .order('created_at', { ascending: false })
+                    .limit(10);
+
+                if (recentMsgs) {
+                    history = recentMsgs.reverse().map(m => ({
+                        role: m.direction === 'inbound' ? 'user' : 'assistant',
+                        content: m.content
+                    }));
+                }
+            } catch (e) { console.warn('⚠️ History fetch failed:', e.message); }
+        }
+
         const result = await alexBrain.generateResponse({
             message: text,
-            history: [],
+            history,
             botConfig: {
                 bot_name: config.companyName,
                 system_prompt: config.customPrompt || 'Eres ALEX IO, asistente virtual inteligente.'
@@ -406,7 +428,12 @@ async function connectToWhatsApp(instanceId, config, res = null) {
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
-        for (const msg of messages) await handleQRMessage(sock, msg, instanceId);
+        for (const msg of messages) {
+            // Process messages asynchronously to avoid blocking the socket event loop
+            handleQRMessage(sock, msg, instanceId).catch(err => {
+                console.error(`🚨 [Async] Error handling message for ${instanceId}:`, err.message);
+            });
+        }
     });
 
     return sock;
@@ -652,6 +679,39 @@ router.post('/instance/:instanceId/restart', async (req, res) => {
     } catch (error) {
         console.error('❌ Error restarting session:', error.message);
         return res.status(500).json({ error: 'Fallo al reiniciar conector' });
+    }
+});
+
+router.get('/templates', (req, res) => {
+    res.json({ success: true, templates });
+});
+
+router.get('/analytics', async (req, res) => {
+    try {
+        const tenantId = req.tenant?.id;
+        if (!tenantId || !isSupabaseEnabled) return res.json({ success: true, stats: [] });
+
+        // Aggregate intents and volume for the last 7 days
+        const { data, error } = await supabase
+            .from('messages')
+            .select('created_at, metadata->intent')
+            .eq('tenant_id', tenantId)
+            .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+
+        if (error) throw error;
+
+        const stats = (data || []).reduce((acc, curr) => {
+            const date = curr.created_at.split('T')[0];
+            const intent = curr.intent || 'general';
+            if (!acc[date]) acc[date] = { date, total: 0, sales: 0, support: 0, greeting: 0, general: 0 };
+            acc[date].total++;
+            acc[date][intent] = (acc[date][intent] || 0) + 1;
+            return acc;
+        }, {});
+
+        return res.json({ success: true, stats: Object.values(stats) });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
     }
 });
 

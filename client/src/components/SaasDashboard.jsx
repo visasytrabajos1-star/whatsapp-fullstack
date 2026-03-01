@@ -62,6 +62,8 @@ function SaasDashboard() {
   const [selected, setSelected] = useState(null);
   const [showNewBotModal, setShowNewBotModal] = useState(false);
   const [showWizard, setShowWizard] = useState(false);
+  const [templates, setTemplates] = useState({});
+  const [analytics, setAnalytics] = useState([]);
   const [usage, setUsage] = useState({ messages_sent: 0, plan_limit: 500, tokens_consumed: 0 });
   const [promptVersions, setPromptVersions] = useState([]);
   const [loadingPromptVersions, setLoadingPromptVersions] = useState(false);
@@ -82,7 +84,23 @@ function SaasDashboard() {
     const resolved = getLastResolvedApiBase();
     if (resolved) setApiDebugUrl(resolved);
     fetchInstances();
+    fetchTemplates();
+    fetchAnalytics();
   }, []);
+
+  const fetchAnalytics = async () => {
+    try {
+      const { data } = await fetchJsonWithApiFallback('/api/saas/analytics', { headers: { ...getAuthHeaders() } });
+      if (data.stats) setAnalytics(data.stats);
+    } catch (e) { console.error("Analytics Error:", e); }
+  };
+
+  const fetchTemplates = async () => {
+    try {
+      const { data } = await fetchJsonWithApiFallback('/api/saas/templates', { headers: { ...getAuthHeaders() } });
+      if (data.templates) setTemplates(data.templates);
+    } catch (e) { console.error("Error templates:", e); }
+  };
 
   useEffect(() => {
     if (selected?.instanceId) fetchPromptVersions(selected.instanceId);
@@ -629,7 +647,29 @@ function SaasDashboard() {
               </div>
 
               <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 h-full flex flex-col">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> Actividad Reciente</h3>
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> Actividad y Analítica</h3>
+
+                {analytics.length > 0 && (
+                  <div className="grid grid-cols-4 gap-2 mb-4">
+                    <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 text-center">
+                      <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Ventas</p>
+                      <p className="text-sm font-bold text-emerald-400">{analytics.reduce((a, b) => a + (b.sales || 0), 0)}</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 text-center">
+                      <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Soporte</p>
+                      <p className="text-sm font-bold text-blue-400">{analytics.reduce((a, b) => a + (b.support || 0), 0)}</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 text-center">
+                      <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Saludos</p>
+                      <p className="text-sm font-bold text-purple-400">{analytics.reduce((a, b) => a + (b.greeting || 0), 0)}</p>
+                    </div>
+                    <div className="bg-slate-900 p-2 rounded-lg border border-slate-700 text-center">
+                      <p className="text-[9px] text-slate-500 font-bold uppercase tracking-tighter">Total 7d</p>
+                      <p className="text-sm font-bold text-white">{analytics.reduce((a, b) => a + (b.total || 0), 0)}</p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex-1 overflow-auto">
                   <div className="bg-slate-900 p-4 rounded border border-slate-800 text-sm">
                     {logs.length === 0 ? (
@@ -670,6 +710,23 @@ function SaasDashboard() {
                           Reiniciar Conector
                         </button>
                       </div>
+
+                <div className="mt-4 border-t border-slate-800 pt-4">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 text-center">Plantillas de Personalidad</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {Object.values(templates).map(t => (
+                      <button
+                        key={t.id}
+                        onClick={() => setConfigDraft(prev => ({ ...prev, customPrompt: t.systemPrompt }))}
+                        className="bg-slate-900/50 border border-slate-700 p-3 rounded-xl hover:border-blue-500 transition-all text-left group"
+                      >
+                        <span className="text-xl mb-1 block">{t.icon}</span>
+                        <p className="text-[10px] font-bold text-blue-400">{t.name}</p>
+                        <p className="text-[9px] text-slate-500 line-clamp-1">{t.description}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                     </div>
                   </div>
                 </div>

@@ -40,14 +40,36 @@ router.post('/stripe/webhook', express.raw({type: 'application/json'}), async (r
         const event = paymentService.constructWebhookEvent(req.body, sig);
 
         // Manejar eventos
+        const session = event.data.object;
+        const email = session.customer_email || session.metadata?.email;
+        const tenantId = session.metadata?.tenantId;
+
         switch (event.type) {
             case 'checkout.session.completed':
-                // Activar suscripción en DB
-                console.log('✅ Pago completado:', event.data.object);
+                console.log('✅ Pago completado:', email);
+                if (isSupabaseEnabled && email) {
+                    // Update user plan based on metadata or price
+                    const planMap = {
+                        [process.env.STRIPE_PRICE_STARTER]: 'STARTER',
+                        [process.env.STRIPE_PRICE_PRO]: 'PRO',
+                        [process.env.STRIPE_PRICE_ENTERPRISE]: 'ENTERPRISE'
+                    };
+                    const plan = planMap[session.line_items?.[0]?.price?.id] || 'PRO';
+                    const limit = plan === 'ENTERPRISE' ? 10000 : (plan === 'PRO' ? 3000 : 1000);
+
+                    await supabase.from('app_users').update({ plan }).eq('email', email);
+                    await supabase.from('tenant_usage_metrics').upsert({
+                        tenant_id: tenantId || `tenant_${Buffer.from(email).toString('base64').substring(0, 8)}`,
+                        plan_limit: limit,
+                        updated_at: new Date().toISOString()
+                    });
+                }
                 break;
             case 'customer.subscription.deleted':
-                // Desactivar cuenta
-                console.log('❌ Suscripción cancelada');
+                console.log('❌ Suscripción cancelada:', email);
+                if (isSupabaseEnabled && email) {
+                    await supabase.from('app_users').update({ plan: 'FREE' }).eq('email', email);
+                }
                 break;
         }
 
