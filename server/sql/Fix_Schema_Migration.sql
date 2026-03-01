@@ -66,3 +66,16 @@ BEGIN
         updated_at = NOW();
 END;
 $$ LANGUAGE plpgsql;
+
+-- 4. CREATE whatsapp_auth_state TABLE
+-- Stores Baileys credentials and keys to survive ephemeral Render restarts
+CREATE TABLE IF NOT EXISTS public.whatsapp_auth_state (
+    instance_id TEXT NOT NULL,
+    key_name TEXT NOT NULL,
+    data JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (instance_id, key_name)
+);
+
+-- Optimize index for querying a specific session
+CREATE INDEX IF NOT EXISTS idx_whatsapp_auth_state_instance ON public.whatsapp_auth_state (instance_id);

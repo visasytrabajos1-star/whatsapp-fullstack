@@ -1,5 +1,6 @@
 const baileys = require('@whiskeysockets/baileys');
-const { makeWASocket, useMultiFileAuthState, DisconnectReason } = baileys;
+const { makeWASocket, DisconnectReason } = baileys;
+const useSupabaseAuthState = require('./useSupabaseAuthState');
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || null;
 const Browsers = baileys.Browsers || null;
 const QRCode = require('qrcode');
@@ -264,10 +265,25 @@ async function handleQRMessage(sock, msg, instanceId) {
 
 // --- CONNECT FUNCTION ---
 async function connectToWhatsApp(instanceId, config, res = null) {
-    const sessionPath = `${sessionsDir}/${instanceId}`;
     clientConfigs.set(instanceId, config);
 
-    const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+    let state, saveCreds, clearState;
+
+    if (isSupabaseEnabled) {
+        // Render Ephemeral storage fix: Use Supabase backend for persistent sessions
+        const authStore = await useSupabaseAuthState(instanceId, supabase);
+        state = authStore.state;
+        saveCreds = authStore.saveCreds;
+        clearState = authStore.clearState;
+    } else {
+        // Fallback backward compat if someone turns off Supabase
+        const { useMultiFileAuthState } = baileys;
+        const sessionPath = `${sessionsDir}/${instanceId}`;
+        const localAuth = await useMultiFileAuthState(sessionPath);
+        state = localAuth.state;
+        saveCreds = localAuth.saveCreds;
+        clearState = () => fs.rmSync(sessionPath, { recursive: true, force: true });
+    }
 
     // Fetch latest WhatsApp Web version to avoid 405 errors
     let version;
@@ -341,8 +357,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
             if (isFatal) {
                 console.error(`🛑 [${instanceId}] FATAL error ${closeCode} — stopping reconnection. Clearing auth state.`);
                 // Clear corrupted auth state so next connect gets a fresh QR
-                const sessionPath = `${sessionsDir}/${instanceId}`;
-                try { fs.rmSync(sessionPath, { recursive: true, force: true }); } catch (_) { }
+                if (clearState) clearState().catch(() => null);
 
                 updateSessionStatus(instanceId, `fatal_error_${closeCode}`, {
                     companyName: config.companyName,
