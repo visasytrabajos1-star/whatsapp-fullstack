@@ -134,11 +134,6 @@ app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email) return res.status(400).json({ error: 'Email es requerido' });
 
-    // Admin bypass (no password required for defined admins)
-    if (ADMIN_EMAILS.includes(email.toLowerCase().trim())) {
-        const { token, tenantId, role } = buildToken(email);
-        return res.json({ token, tenantId, role });
-    }
 
     try {
         if (isSupabaseEnabled && password) {

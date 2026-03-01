@@ -123,8 +123,8 @@ const safeDeletePersistentSession = async (instanceId) => {
     if (error) console.warn(`⚠️ Failed deleting ${instanceId} from Supabase:`, error.message);
 };
 
-hydrateSessionStatus().catch((error) => {
-    console.warn('⚠️ Session hydration bootstrap error:', error.message);
+hydrateSessionStatus().then(({ error }) => {
+    if (error) console.warn('⚠️ Session hydration bootstrap error:', error.message);
 });
 
 // --- HANDLER: QR MODE (Baileys) ---
@@ -189,7 +189,7 @@ async function handleQRMessage(sock, msg, instanceId) {
                 content: text,
                 message_type: 'text',
                 status: 'received'
-            }).catch(e => console.warn('⚠️ Log inbound failed:', e.message));
+            }).then(({ error }) => { if (error) console.warn('⚠️ Log inbound failed:', error.message); });
 
             // CRM Sync: Try to identify and sync user to Copper
             const cleanPhone = remoteJid.split('@')[0];
@@ -247,7 +247,7 @@ async function handleQRMessage(sock, msg, instanceId) {
                     ai_model: result.trace?.model || 'unknown',
                 metadata: { intent: result.trace?.intent || 'general' },
                     status: 'sent'
-                }).catch(e => console.warn('⚠️ Log outbound failed:', e.message));
+                }).then(({ error }) => { if (error) console.warn('⚠️ Log outbound failed:', error.message); });
             }
 
             if (tenantId && isSupabaseEnabled) {
@@ -264,7 +264,7 @@ async function handleQRMessage(sock, msg, instanceId) {
                             tokens_consumed: (usage.tokens_consumed || 0) + tokenUsage,
                             plan_limit: usage.plan_limit,
                             updated_at: new Date().toISOString()
-                        }).catch(() => { });
+                        }).then(({ error: upsertErr }) => { if (upsertErr) console.warn('⚠️ Usage sync failed:', upsertErr.message); });
                     }
                 });
             }
@@ -352,6 +352,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
                         res.json({ success: true, qr_code: url, instance_id: instanceId });
                     }
                 })
+                .then(({ error }) => { if (error) console.error(`❌ [${instanceId}] QR status update failed:`, error.message); })
                 .catch((error) => {
                     console.error(`❌ [${instanceId}] QR conversion failed:`, error.message);
                 });
@@ -361,11 +362,12 @@ async function connectToWhatsApp(instanceId, config, res = null) {
             updateSessionStatus(instanceId, 'disconnected', {
                 companyName: config.companyName,
                 qr_code: null
-            }).catch(() => null);
+            }).then(({ error }) => { if (error) console.warn('⚠️ Disconnect status sync failed:', error.message); });
 
             // Permanent errors that should NOT trigger reconnection
-            const FATAL_CODES = [401, 403, 405, 406, 409, 410, 440];
-            const isFatal = FATAL_CODES.includes(closeCode);
+            // 411: Multi-device mismatch / Bad MAC
+            const FATAL_CODES = [401, 403, 405, 406, 409, 410, 440, 411];
+            const isFatal = FATAL_CODES.includes(closeCode) || lastDisconnect?.error?.message?.includes('Bad MAC');
             const isLoggedOut = closeCode === DisconnectReason.loggedOut;
             const shouldReconnect = !isFatal && !isLoggedOut;
             const attempts = (reconnectAttempts.get(instanceId) || 0) + 1;
@@ -383,7 +385,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
                     companyName: config.companyName,
                     qr_code: null,
                     error: `WhatsApp rechazó la conexión (código ${closeCode}). Reintenta desde el dashboard.`
-                }).catch(() => null);
+                }).then(({ error }) => { if (error) console.warn('⚠️ Fatal status sync failed:', error.message); });
 
                 if (res && !res.headersSent) {
                     res.status(503).json({
@@ -403,7 +405,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
                 updateSessionStatus(instanceId, 'failed_max_retries', {
                     companyName: config.companyName,
                     qr_code: null
-                }).catch(() => null);
+                }).then(({ error }) => { if (error) console.warn('⚠️ Max retries status sync failed:', error.message); });
 
                 if (res && !res.headersSent) {
                     res.status(503).json({
@@ -420,7 +422,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
             updateSessionStatus(instanceId, 'online', {
                 companyName: config.companyName,
                 qr_code: null
-            }).catch(() => null);
+            }).then(({ error }) => { if (error) console.warn('⚠️ Online status sync failed:', error.message); });
             console.log(`✅ [${instanceId}] ${config.companyName} ONLINE!`);
         }
     });
@@ -779,7 +781,7 @@ router.get('/superadmin/clients', async (req, res) => {
         const clients = allUsers.map(u => {
             const tId = `tenant_${Buffer.from(u.email).toString('base64').substring(0, 8)}`;
             const userUsage = (usage || []).find(us => us.tenant_id === tId || us.tenant_id === u.id) || { messages_sent: 0, plan_limit: 0, tokens_consumed: 0 };
-            const userBots = (bots || []).filter(b => b.tenant_id === tId || b.tenant_id === u.id);
+            const userBots = (bots || []).filter(b => b.tenant_id === tId || b.tenant_id === u.id || (u.email && b.owner_email === u.email));
             return {
                 id: u.id,
                 tenant_id: tId,
@@ -1070,12 +1072,12 @@ const restoreSessions = async () => {
                     ownerEmail: session.owner_email,
                     provider: 'baileys'
                 };
-                connectToWhatsApp(instanceId, config).catch(e => {
-                    console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, e.message);
+                connectToWhatsApp(instanceId, config).then(({ error }) => {
+                    if (error) console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, error.message);
                 });
             } else {
                 console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Sesión no encontrada localmente y Supabase Auth desactivado.`);
-                updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).catch(() => { });
+                updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).then(({ error }) => { if (error) console.warn('⚠️ Recovery status sync failed:', error.message); });
             }
         }
     } catch (err) {

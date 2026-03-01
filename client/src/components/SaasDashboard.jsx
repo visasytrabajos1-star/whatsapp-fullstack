@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, Component } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2, X, Wand2, LogOut } from 'lucide-react';
+import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2, X, Wand2, LogOut, MessageCircle } from 'lucide-react';
 import PromptWizard from './PromptWizard';
 import { fetchJsonWithApiFallback, getLastResolvedApiBase, getPreferredApiBase, getAuthHeaders } from '../api';
 
