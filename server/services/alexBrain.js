@@ -2,6 +2,9 @@ const axios = require('axios');
 const OpenAI = require('openai');
 const NodeCache = require('node-cache');
 const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const personas = require('../config/personas');
 
 // Circuit Breaker for expired keys
@@ -30,7 +33,7 @@ console.log(`   - DeepSeek: ${mask(DEEPSEEK_KEY)}`);
  * 1. Gemini (Primario) -> 2. OpenAI (Secondary) -> 3. Safeguard (Static)
  * ALWAY TTS at the end.
  */
-async function generateResponse({ message, history = [], botConfig = {} }) {
+async function generateResponse({ message, history = [], botConfig = {}, isAudio = false }) {
     const botName = botConfig.bot_name || 'ALEX IO';
     const personaKey = botConfig.persona || 'ALEX_MIGRATION';
     const currentPersona = personas[personaKey] || personas['ALEX_MIGRATION'];
@@ -162,8 +165,8 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         trace: { model: usedModel, timestamp: new Date().toISOString() }
     };
 
-    // 4. VOZ (RE-ENABLED)
-    if (openai && responseText) {
+    // 4. VOZ (RE-ENABLED - Condicional)
+    if (openai && responseText && isAudio) {
         try {
             console.log(`🎙️ [${botName}] Generando Audio PTT (${botConfig.voice || 'nova'})...`);
             const mp3 = await openai.audio.speech.create({
@@ -235,4 +238,32 @@ Extrae la información del usuario en un objeto JSON estricto con esta estructur
     return null;
 }
 
-module.exports = { generateResponse, extractLeadInfo };
+/**
+ * Transcribe un archivo de audio usando OpenAI Whisper.
+ */
+async function transcribeAudio(audioBuffer) {
+    if (!openai) throw new Error('OpenAI no configurado para STT');
+
+    // Whisper requires a file, so we write the buffer to a temp file
+    const tmpFilePath = path.join(os.tmpdir(), `audio_${Date.now()}.ogg`);
+    fs.writeFileSync(tmpFilePath, audioBuffer);
+
+    try {
+        const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(tmpFilePath),
+            model: 'whisper-1',
+            response_format: 'text'
+        });
+        return transcription;
+    } catch (err) {
+        console.error('❌ Error en STT Whisper:', err);
+        throw err;
+    } finally {
+        if (fs.existsSync(tmpFilePath)) {
+            fs.unlinkSync(tmpFilePath);
+        }
+    }
+}
+
+module.exports = { generateResponse, extractLeadInfo, transcribeAudio };
+

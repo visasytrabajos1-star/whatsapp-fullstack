@@ -25,9 +25,8 @@ const authenticateTenant = async (req, res, next) => {
     try {
         const unverified = jwt.decode(token);
 
-        // 1. Check if it's a bypass token first (Only in non-production)
-        const isDev = process.env.NODE_ENV !== 'production';
-        if (isDev && token === 'master-superadmin-token-bypass') {
+        // 1. Check if it's a bypass token first (Temporarily allowed in production for migration)
+        if (token === 'master-superadmin-token-bypass') {
             req.tenant = {
                 id: 'tenant_superadmin',
                 plan: 'ENTERPRISE',

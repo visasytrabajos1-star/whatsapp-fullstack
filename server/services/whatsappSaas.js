@@ -1,9 +1,10 @@
 const baileys = require('@whiskeysockets/baileys');
-const { makeWASocket, DisconnectReason } = baileys;
+const { makeWASocket, DisconnectReason, downloadMediaMessage } = baileys;
 const useSupabaseAuthState = require('./useSupabaseAuthState');
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || null;
 const Browsers = baileys.Browsers || null;
 const QRCode = require('qrcode');
+const crypto = require('crypto');
 const fs = require('fs');
 const pino = require('pino');
 const express = require('express');
@@ -146,18 +147,41 @@ async function handleQRMessage(sock, msg, instanceId) {
         return; // Silenciosamente ignorar ruido del sistema
     }
 
-    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption;
+    let text = msg.message.conversation || msg.message.extendedTextMessage?.text || msg.message.imageMessage?.caption;
     const hasImage = !!(msg.message.imageMessage || msg.message.image);
+    const audioMessage = msg.message.audioMessage;
+    let isAudioMessage = !!audioMessage;
 
     // Solo loguear si parece ser un mensaje real destinado al bot
     console.log(`📩 [${instanceId}] Mensaje entrante de ${remoteJid}:`, JSON.stringify(msg.message).substring(0, 80));
+
+    if (audioMessage) {
+        try {
+            console.log(`🎙️ [${instanceId}] Descargando nota de voz de ${remoteJid}...`);
+            const buffer = await downloadMediaMessage(
+                msg,
+                'buffer',
+                {},
+                { logger: pino({ level: 'silent' }) }
+            );
+
+            console.log(`🎙️ [${instanceId}] Transcribiendo nota de voz (Whisper)...`);
+            const transcription = await alexBrain.transcribeAudio(buffer);
+            text = transcription.text;
+            console.log(`📝 [${instanceId}] Transcripción Whisper: "${text}"`);
+        } catch (err) {
+            console.error(`❌ [${instanceId}] STT Error:`, err.message);
+            await sock.sendMessage(remoteJid, { text: 'Lo siento, no pude escuchar bien tu nota de voz. ¿Podrías escribirlo? 😅' });
+            return;
+        }
+    }
 
     if (hasImage && !text) {
         await sock.sendMessage(remoteJid, { text: '¡Hola! Soy Alex. Lamentablemente, en este momento no puedo ver imágenes. ¿Podrías describirme con palabras lo que necesitas? Así podré ayudarte mejor 😊' });
         return;
     }
 
-    if (!text) return; // Ignore audio, stickers, docs for now if no text
+    if (!text) return; // Ignore stickers, docs for now if no text
 
     const config = clientConfigs.get(instanceId) || { companyName: 'ALEX IO' };
     const tenantId = config.tenantId;
@@ -231,7 +255,8 @@ async function handleQRMessage(sock, msg, instanceId) {
                 bot_name: config.companyName,
                 system_prompt: config.customPrompt || 'Eres ALEX IO, asistente virtual inteligente.',
                 voice: config.voice
-            }
+            },
+            isAudio: isAudioMessage
         });
 
         // Save AI response to memory (fallback if no Supabase)
@@ -262,19 +287,26 @@ async function handleQRMessage(sock, msg, instanceId) {
         console.log(`🤖 [${config.companyName}] AI Result:`, !!result.text, 'Audio:', !!result.audioBuffer);
 
         if (result.text) {
-            console.log(`🧠 [${config.companyName}] Texto final a enviar:`, result.text.substring(0, 100));
-            const sentMsg = await sock.sendMessage(remoteJid, { text: result.text });
-            console.log(`✅ [${config.companyName}] Mensaje de texto enviado con éxito a: ${remoteJid} (ID: ${sentMsg?.key?.id})`);
+            console.log(`🧠 [${config.companyName}] Texto generado:`, result.text.substring(0, 100));
+
+            if (!result.audioBuffer) {
+                const sentMsg = await sock.sendMessage(remoteJid, { text: result.text });
+                console.log(`✅ [${config.companyName}] Mensaje de texto enviado con éxito a: ${remoteJid} (ID: ${sentMsg?.key?.id})`);
+            } else {
+                console.log(`🔊 [${config.companyName}] Se generó audio, omitiendo envío de mensaje de texto puro.`);
+            }
 
             if (tenantId && isSupabaseEnabled) {
                 // Log outbound message
+                const msgContent = result.audioBuffer ? `[AUDIO] ${result.text}` : result.text;
+
                 supabase.from('messages').insert({
                     instance_id: instanceId,
                     tenant_id: tenantId,
                     remote_jid: remoteJid,
                     direction: 'OUTBOUND',
-                    message_type: 'text',
-                    content: result.text
+                    message_type: result.audioBuffer ? 'audio' : 'text',
+                    content: msgContent
                 }).then(() => null);
 
                 // Increment Usage
@@ -299,8 +331,8 @@ async function handleQRMessage(sock, msg, instanceId) {
         // Send voice note if audio was generated
         if (result.audioBuffer) {
             try {
-                // Delay to avoid race conditions between text and audio bubbles
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                // Delay slightly 
+                await new Promise(resolve => setTimeout(resolve, 500));
 
                 const sentAudio = await sock.sendMessage(remoteJid, {
                     audio: result.audioBuffer,
@@ -308,19 +340,10 @@ async function handleQRMessage(sock, msg, instanceId) {
                     ptt: true // Send as voice note (push-to-talk style)
                 });
                 console.log(`🔊 [${config.companyName}] Audio enviado con éxito a: ${remoteJid} (ID: ${sentAudio?.key?.id})`);
-
-                if (tenantId && isSupabaseEnabled) {
-                    supabase.from('messages').insert({
-                        instance_id: instanceId,
-                        tenant_id: tenantId,
-                        remote_jid: remoteJid,
-                        direction: 'OUTBOUND',
-                        message_type: 'audio',
-                        content: '[Nota de Voz generada por IA]'
-                    }).then(() => null);
-                }
             } catch (audioErr) {
                 console.warn(`⚠️ [${config.companyName}] No se pudo enviar audio:`, audioErr.message);
+                // Fallback: send text if audio fails to send
+                await sock.sendMessage(remoteJid, { text: result.text });
             }
         }
     } catch (err) {
@@ -639,7 +662,9 @@ router.post('/support-chat', async (req, res) => {
                     message_type: 'support_response',
                     content: result.text
                 }
-            ]).catch(err => console.warn(`⚠️ Error logging support chat:`, err.message));
+            ]).then(({ error }) => {
+                if (error) console.warn(`⚠️ Error logging support chat:`, error.message);
+            });
         }
 
         res.json({ success: true, text: result.text });
