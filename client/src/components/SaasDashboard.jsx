@@ -654,12 +654,22 @@ function SaasDashboard() {
                           <span className="text-blue-400 uppercase tracking-tighter">Estado: {selected.status || 'desconocido'}</span>
                         </p>
                       </div>
-                      <button
-                        onClick={handleRestartInstance}
-                        className="text-[10px] bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest"
-                      >
-                        Reiniciar Conector
-                      </button>
+                      <div className="flex gap-2">
+                        {['disconnected', 'error', 'failed_max_retries', 'timeout_waiting_qr'].includes(selected.status) && (
+                          <button
+                            onClick={handleRestartInstance}
+                            className="text-[10px] bg-blue-900/30 text-blue-400 border border-blue-800/50 hover:bg-blue-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest flex items-center gap-1"
+                          >
+                            <Plus size={10} /> Generar Nuevo QR
+                          </button>
+                        )}
+                        <button
+                          onClick={handleRestartInstance}
+                          className="text-[10px] bg-red-900/30 text-red-400 border border-red-800/50 hover:bg-red-800 hover:text-white transition-colors px-3 py-1 rounded font-bold uppercase tracking-widest"
+                        >
+                          Reiniciar Conector
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

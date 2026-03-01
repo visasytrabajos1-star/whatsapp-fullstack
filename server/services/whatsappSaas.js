@@ -176,6 +176,19 @@ async function handleQRMessage(sock, msg, instanceId) {
             }
         }
 
+        // Phase 4: Persistence (Log Message Inbound)
+        if (isSupabaseEnabled) {
+            supabase.from('messages').insert({
+                instance_id: instanceId,
+                tenant_id: tenantId,
+                direction: 'inbound',
+                customer_phone: remoteJid,
+                content: text,
+                message_type: 'text',
+                status: 'received'
+            }).catch(e => console.warn('⚠️ Log inbound failed:', e.message));
+        }
+
         const result = await alexBrain.generateResponse({
             message: text,
             history: [],
@@ -191,6 +204,20 @@ async function handleQRMessage(sock, msg, instanceId) {
             console.log(`🧠 [${config.companyName}] Texto final a enviar:`, result.text.substring(0, 100));
             const sentMsg = await sock.sendMessage(remoteJid, { text: result.text });
             console.log(`✅ [${config.companyName}] Mensaje de texto enviado con éxito a: ${remoteJid} (ID: ${sentMsg?.key?.id})`);
+
+            // Phase 4: Persistence (Log Message Outbound)
+            if (isSupabaseEnabled) {
+                supabase.from('messages').insert({
+                    instance_id: instanceId,
+                    tenant_id: tenantId,
+                    direction: 'outbound',
+                    customer_phone: remoteJid,
+                    content: result.text,
+                    message_type: 'text',
+                    ai_model: result.trace?.model || 'unknown',
+                    status: 'sent'
+                }).catch(e => console.warn('⚠️ Log outbound failed:', e.message));
+            }
 
             if (tenantId && isSupabaseEnabled) {
                 // Increment Usage
@@ -618,13 +645,35 @@ router.get('/superadmin/clients', async (req, res) => {
     if (!isSupabaseEnabled) return res.json({ clients: [] });
 
     try {
-        // Fetch users using admin api if service role available, else rely on a view or standard table (app_users fallback)
-        // Since app_users has plan and role, we pull them.
-        const { data: users } = await supabase.from('app_users').select('id, email, plan, role');
+        // Fetch users from both 'app_users' (manual reg) and 'profiles' (supabase auth)
+        const { data: appUsers } = await supabase.from('app_users').select('id, email, plan, role');
+        const { data: profiles } = await supabase.from('profiles').select('id, email');
+
         const { data: usage } = await supabase.from(usageTable).select('*');
         const { data: bots } = await supabase.from(sessionsTable).select('instance_id, tenant_id, status, company_name');
 
-        const allUsers = users || [];
+        // Merge users, avoiding duplicates by email
+        const userMap = new Map();
+
+        (appUsers || []).forEach(u => {
+            userMap.set(u.email.toLowerCase(), { ...u, source: 'app_users' });
+        });
+
+        (profiles || []).forEach(p => {
+            const email = p.email?.toLowerCase();
+            if (email && !userMap.has(email)) {
+                userMap.set(email, {
+                    id: p.id,
+                    email: p.email,
+                    plan: 'PRO', // Default for profiles if not specified
+                    role: 'OWNER',
+                    source: 'profiles'
+                });
+            }
+        });
+
+        const allUsers = Array.from(userMap.values());
+
         const clients = allUsers.map(u => {
             const tId = `tenant_${Buffer.from(u.email).toString('base64').substring(0, 8)}`;
             const userUsage = (usage || []).find(us => us.tenant_id === tId || us.tenant_id === u.id) || { messages_sent: 0, plan_limit: 0, tokens_consumed: 0 };
