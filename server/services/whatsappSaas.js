@@ -11,6 +11,7 @@ const router = express.Router();
 const alexBrain = require('./alexBrain');
 const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 const hubspotService = require('./hubspotService');
+const copperService = require('./copperService');
 const {
     savePromptVersion,
     listPromptVersions,
@@ -216,14 +217,19 @@ async function handleQRMessage(sock, msg, instanceId) {
         const lowerText = text.toLowerCase();
         const isTrigger = lowerText.match(/(comprar|precio|costo|agendar|cita|quiero|info|contacto|hablar|humano)/) || (history.filter(h => h.role === 'user').length % 4 === 0);
 
-        if (isTrigger && config.hubspotAccessToken) {
+        if (isTrigger && (config.hubspotAccessToken || (config.copperApiKey && config.copperUserEmail))) {
             alexBrain.extractLeadInfo({ history, systemPrompt: config.customPrompt })
                 .then(lead => {
                     if (lead && lead.isLead) {
                         const phoneStr = remoteJid.split('@')[0];
-                        hubspotService.syncContact(phoneStr, lead, config.hubspotAccessToken);
+                        if (config.hubspotAccessToken) {
+                            hubspotService.syncContact(phoneStr, lead, config.hubspotAccessToken);
+                        }
+                        if (config.copperApiKey && config.copperUserEmail) {
+                            copperService.syncContact(phoneStr, lead, { apiKey: config.copperApiKey, userEmail: config.copperUserEmail });
+                        }
                     }
-                }).catch(err => console.error(`⚠️ [HubSpot Sync Error] ${config.companyName}:`, err.message));
+                }).catch(err => console.error(`⚠️ [CRM Sync Error] ${config.companyName}:`, err.message));
         }
 
         console.log(`🤖 [${config.companyName}] AI Result:`, !!result.text, 'Audio:', !!result.audioBuffer);
@@ -448,7 +454,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 
 // --- ENDPOINTS ---
 router.post('/connect', async (req, res) => {
-    const { companyName, customPrompt, voice, hubspotAccessToken, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
+    const { companyName, customPrompt, voice, hubspotAccessToken, copperApiKey, copperUserEmail, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
     const cleanName = String(companyName || '').trim();
 
     if (!cleanName) {
@@ -462,6 +468,8 @@ router.post('/connect', async (req, res) => {
         customPrompt,
         voice: voice || 'nova',
         hubspotAccessToken: hubspotAccessToken || '',
+        copperApiKey: copperApiKey || '',
+        copperUserEmail: copperUserEmail || '',
         provider,
         tenantId,
         ownerEmail: req.tenant?.email || '',

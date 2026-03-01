@@ -1,73 +1,118 @@
 const axios = require('axios');
 
-class CopperCRM {
-    constructor() {
-        this.apiKey = process.env.COPPER_API_KEY;
-        this.userEmail = process.env.COPPER_USER_EMAIL || 'tutrabajoeneuropacom@gmail.com';
-        this.baseUrl = 'https://api.copper.com/developer_api/v1';
-    }
+/**
+ * Servicio Integrador para Copper CRM
+ */
 
-    get headers() {
-        return {
-            'X-PW-AccessToken': this.apiKey,
+class CopperService {
+    /**
+     * Sincroniza un contacto y registra una nota basados en el análisis de la IA.
+     * @param {string} phone Teléfono de WhatsApp
+     * @param {Object} leadData { name, email, temperature, summary }
+     * @param {Object} creds { apiKey, userEmail }
+     */
+    static async syncContact(phone, leadData, creds) {
+        if (!creds || !creds.apiKey || !creds.userEmail) return null;
+        if (!phone) return null;
+
+        const headers = {
+            'X-PW-AccessToken': creds.apiKey,
             'X-PW-Application': 'developer_api',
-            'X-PW-UserEmail': this.userEmail,
+            'X-PW-UserEmail': creds.userEmail,
             'Content-Type': 'application/json'
         };
-    }
-
-    /**
-     * Find or create a person by phone number
-     */
-    async syncUser(phone, name, email) {
-        if (!this.apiKey) return null;
 
         try {
-            let person = null;
+            // 1. Buscar si el contacto ya existe por teléfono
+            let personId = await this.searchPersonByPhone(phone, headers);
 
-            // 1. Search by Email
-            if (email) {
-                const searchEmail = await axios.post(`${this.baseUrl}/people/search`, {
-                    emails: [{ email: email }]
-                }, { headers: this.headers });
-                person = searchEmail.data?.[0];
-            }
-
-            // 2. Search by Phone (if not found yet)
-            if (!person && phone) {
-                const searchPhone = await axios.post(`${this.baseUrl}/people/search`, {
-                    phone_numbers: [{ number: phone }]
-                }, { headers: this.headers });
-                person = searchPhone.data?.[0];
-            }
-
-            // 3. Create or Update
-            const payload = {
-                name: name || (person ? undefined : `User ${phone || email}`),
-                emails: email ? [{ email, category: 'work' }] : undefined,
-                phone_numbers: phone ? [{ number: phone, category: 'mobile' }] : undefined
+            const personData = {
+                phone_numbers: [{ number: phone, category: 'work' }]
             };
 
-            if (!person) {
-                console.log(`👤 Creating Copper Contact: ${name || email || phone}`);
-                const createRes = await axios.post(`${this.baseUrl}/people`, payload, { headers: this.headers });
-                person = createRes.data;
+            if (leadData.name && leadData.name.toLowerCase() !== 'desconocido') {
+                personData.name = leadData.name;
             } else {
-                console.log(`👤 Updating Copper Contact: ${person.name}`);
-                // Only update if we have new info worth adding (simplified for MVP)
-                // In a real app we'd merge fields. reliable update needs person_id
-                if (email || phone) {
-                    await axios.put(`${this.baseUrl}/people/${person.id}`, payload, { headers: this.headers });
-                }
+                personData.name = `Lead WhatsApp - ${phone}`;
             }
 
-            return person;
+            if (leadData.email && leadData.email.includes('@')) {
+                personData.emails = [{ email: leadData.email, category: 'work' }];
+            }
+
+            // Mapeo rudimentario de temperatura a Custom Fields o Tags (usamos tags por simplicidad)
+            personData.tags = [leadData.temperature || 'COLD'];
+
+            if (!personId) {
+                // 2. Crear Contacto si no existe
+                personId = await this.createPerson(personData, headers);
+                console.log(`✅ [Copper] Nuevo Person creado (ID: ${personId}, Temp: ${leadData.temperature})`);
+            } else {
+                // 3. Actualizar Contacto si ya existe
+                await this.updatePerson(personId, personData, headers);
+                console.log(`🔄 [Copper] Person actualizado (ID: ${personId}, Temp: ${leadData.temperature})`);
+            }
+
+            // 4. Agregar Nota (Activity) con el resumen
+            if (personId && leadData.summary) {
+                await this.createActivity(personId, leadData.summary, headers);
+                console.log(`📝 [Copper] Actividad/Nota agregada al Person ${personId}`);
+            }
+
+            return personId;
 
         } catch (error) {
-            console.error('❌ Copper CRM Error:', error.response?.data || error.message);
+            console.error('❌ [Copper Error]:', error.response?.data?.message || error.message);
             return null;
         }
     }
+
+    static async searchPersonByPhone(phone, headers) {
+        try {
+            const url = 'https://api.copper.com/developer_api/v1/people/search';
+            const payload = {
+                phone_numbers: [phone]
+            };
+            const res = await axios.post(url, payload, { headers });
+
+            if (res.data && res.data.length > 0) {
+                return res.data[0].id;
+            }
+            return null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    static async createPerson(personData, headers) {
+        const url = 'https://api.copper.com/developer_api/v1/people';
+        const res = await axios.post(url, personData, { headers });
+        return res.data.id;
+    }
+
+    static async updatePerson(personId, personData, headers) {
+        const url = `https://api.copper.com/developer_api/v1/people/${personId}`;
+        await axios.put(url, personData, { headers });
+    }
+
+    static async createActivity(personId, summary, headers) {
+        const url = 'https://api.copper.com/developer_api/v1/activities';
+
+        // type_id 0 is standard note
+        const payload = {
+            parent: {
+                type: 'person',
+                id: personId
+            },
+            type: {
+                category: 'user',
+                id: 0
+            },
+            details: `🤖 **Resumen de Conversación (IA Bot):**\n\n${summary}`
+        };
+
+        await axios.post(url, payload, { headers });
+    }
 }
 
-module.exports = new CopperCRM();
+module.exports = CopperService;

@@ -77,7 +77,9 @@ function SaasDashboard() {
     metaPhoneNumberId: '',
     metaAccessToken: '',
     dialogApiKey: '',
-    hubspotAccessToken: ''
+    hubspotAccessToken: '',
+    copperApiKey: '',
+    copperUserEmail: ''
   });
 
   useEffect(() => {
@@ -143,7 +145,9 @@ function SaasDashboard() {
       metaPhoneNumberId: selected.metaPhoneNumberId || '',
       metaAccessToken: selected.metaAccessToken || '',
       dialogApiKey: selected.dialogApiKey || '',
-      hubspotAccessToken: selected.hubspotAccessToken || ''
+      hubspotAccessToken: selected.hubspotAccessToken || '',
+      copperApiKey: selected.copperApiKey || '',
+      copperUserEmail: selected.copperUserEmail || ''
     });
   }, [selected]);
 
@@ -271,7 +275,9 @@ function SaasDashboard() {
         metaPhoneNumberId: '',
         metaAccessToken: '',
         dialogApiKey: '',
-        hubspotAccessToken: ''
+        hubspotAccessToken: '',
+        copperApiKey: '',
+        copperUserEmail: ''
       };
 
       if (provider !== 'baileys') {
@@ -663,6 +669,32 @@ function SaasDashboard() {
                         onChange={(e) => setConfigDraft((prev) => ({ ...prev, hubspotAccessToken: e.target.value }))}
                       />
                       <p className="text-[10px] text-slate-500 mt-2 leading-tight">La IA leerá las conversaciones en tiempo real y enviará los prospectos a tu cuenta de HubSpot calificándolos como Fríos, Tibios o Calientes.</p>
+                    </div>
+
+                    <div className="bg-slate-900 border border-pink-500/30 rounded p-4 mt-4">
+                      <h4 className="text-sm font-bold text-pink-400 mb-2">Copper CRM</h4>
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">User Email</label>
+                          <input
+                            className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm"
+                            placeholder="usuario@empresa.com"
+                            value={configDraft.copperUserEmail || ''}
+                            onChange={(e) => setConfigDraft((prev) => ({ ...prev, copperUserEmail: e.target.value }))}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-400 mb-1">API Key</label>
+                          <input
+                            className="w-full bg-slate-950 border border-slate-700 rounded p-2 text-sm"
+                            type="password"
+                            placeholder="xxxxxxxx-xxxx-xxxx..."
+                            value={configDraft.copperApiKey || ''}
+                            onChange={(e) => setConfigDraft((prev) => ({ ...prev, copperApiKey: e.target.value }))}
+                          />
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-2 leading-tight">Sincroniza y califica automáticamente los perfiles de prospectos en Copper.</p>
                     </div>
                   </div>
 
