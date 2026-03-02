@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState, Component } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2, X, Wand2, LogOut, MessageCircle } from 'lucide-react';
+import { Shield, Activity, Settings, Smartphone, Plus, Loader, AlertTriangle, CheckCircle2, X, Wand2, LogOut, MessageCircle, Languages } from 'lucide-react';
 import PromptWizard from './PromptWizard';
+import { useTranslation } from 'react-i18next';
 import { fetchJsonWithApiFallback, getLastResolvedApiBase, getPreferredApiBase, getAuthHeaders } from '../api';
 
 const VERSION = 'v2.1.0';
@@ -47,6 +48,7 @@ class ErrorBoundary extends Component {
 }
 
 function SaasDashboard() {
+  const { t, i18n } = useTranslation();
   const userEmail = localStorage.getItem('demo_email') || 'user@app.com';
   const userRole = localStorage.getItem('alex_io_role') || 'OWNER';
   const userTenant = localStorage.getItem('alex_io_tenant') || '';
@@ -443,6 +445,11 @@ function SaasDashboard() {
     }
   };
 
+  const changeLanguage = (lng) => {
+    i18n.changeLanguage(lng);
+    localStorage.setItem('i18nextLng', lng);
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-white font-sans">
 
@@ -507,9 +514,25 @@ function SaasDashboard() {
           <span className="text-[10px] bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold px-2 py-0.5 rounded-full">{VERSION}</span>
         </div>
         <div className="flex items-center gap-3">
+          {/* Language Switcher */}
+          <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg px-2 mr-2">
+            <Languages size={14} className="text-slate-500 mr-2" />
+            <select
+              value={i18n.language}
+              onChange={(e) => changeLanguage(e.target.value)}
+              className="bg-transparent text-[10px] font-bold text-slate-300 outline-none py-1 cursor-pointer"
+            >
+              <option value="es">ES</option>
+              <option value="en">EN</option>
+              <option value="pt">PT</option>
+            </select>
+          </div>
+
           <div className="text-right hidden sm:block">
             <p className="text-xs text-slate-400">{userEmail}</p>
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">{userRole === 'SUPERADMIN' ? '⭐ Admin' : '👤 Cliente'}</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">
+              {userRole === 'SUPERADMIN' ? t('dashboard.admin_role', '⭐ Admin') : t('dashboard.client_role', '👤 Cliente')}
+            </p>
           </div>
           <Link to="/pricing" className="bg-blue-600 px-4 py-2 rounded font-bold hover:bg-blue-500 text-sm">Planes</Link>
           <button
@@ -540,7 +563,7 @@ function SaasDashboard() {
         <aside className="w-64 bg-slate-950 border-r border-slate-800 p-4 flex flex-col">
           <div className="mb-6 bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg shadow-blue-900/5">
             <h2 className="text-[10px] font-bold uppercase text-slate-500 tracking-widest flex justify-between items-center mb-2">
-              Uso del Plan
+              {t('dashboard.usage_limit', 'Uso del Plan')}
               <span className="text-blue-400">{usage.messages_sent} / {usage.plan_limit}</span>
             </h2>
             <div className="w-full bg-slate-800 rounded-full h-1.5 mb-2 overflow-hidden">
@@ -551,7 +574,7 @@ function SaasDashboard() {
             </p>
           </div>
 
-          <h2 className="text-xs font-bold uppercase text-slate-500 tracking-widest mb-4">Mis Bots</h2>
+          <h2 className="text-xs font-bold uppercase text-slate-500 tracking-widest mb-4">{t('dashboard.bots_title', 'Mis Bots')}</h2>
           <div className="space-y-2 flex-1 overflow-auto">
             {instances.map((inst) => (
               <button key={inst.id} onClick={() => setSelected(inst)} className={`w-full text-left p-3 rounded-lg flex items-center justify-between ${selected?.id === inst.id ? 'bg-blue-600' : 'bg-slate-900 hover:bg-slate-800'}`}>
@@ -568,7 +591,7 @@ function SaasDashboard() {
             disabled={connecting}
             className="w-full mt-4 py-2 border border-dashed border-slate-700 text-slate-500 rounded-lg hover:border-blue-500 hover:text-blue-500 flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
           >
-            {connecting ? <Loader className="animate-spin" size={16} /> : <Plus size={16} />} <span>Nuevo Bot</span>
+            {connecting ? <Loader className="animate-spin" size={16} /> : <Plus size={16} />} <span>{t('dashboard.new_bot', 'Nuevo Bot')}</span>
           </button>
         </aside>
 
@@ -576,7 +599,7 @@ function SaasDashboard() {
           {selected ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <div className="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Settings size={20} className="text-blue-500" /> Configuración</h3>
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Settings size={20} className="text-blue-500" /> {t('dashboard.settings', 'Configuración')}</h3>
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">Nombre del Bot</label>
@@ -676,7 +699,7 @@ function SaasDashboard() {
               </div>
 
               <div className="bg-slate-800 rounded-xl p-6 border border-slate-700 h-full flex flex-col">
-                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> Actividad y Analítica</h3>
+                <h3 className="text-lg font-bold mb-4 flex items-center gap-2"><Activity size={20} className="text-green-500" /> {t('dashboard.analytics', 'Actividad y Analítica')}</h3>
 
                 {analytics.length > 0 && (
                   <div className="grid grid-cols-4 gap-2 mb-4">

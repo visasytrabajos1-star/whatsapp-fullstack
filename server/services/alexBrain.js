@@ -173,7 +173,41 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
         }
     };
 
-    // 4. VOZ (RE-ENABLED)
+    // 4. ENTERPRISE V3: AI COMPLIANCE TRIBUNAL
+    // Only run for outbound real messages, not internal translations
+    if (responseText && !botName.includes('Translator')) {
+        try {
+            console.log(`🛡️ [TRIBUNAL] Validating compliance for: ${botName}`);
+            const tribunalRes = await axios.post('https://api.openai.com/v1/chat/completions', {
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: `You are the AI Compliance Tribunal. Audit the following AI draft.
+                    Rules:
+                    1. Check for PII (Credit cards, SSN, passwords).
+                    2. Check for Hallucinations (Offering prices/discounts not in the prompt).
+                    3. Check for illegal or dangerous content.
+                    Respond ONLY with a JSON object: {"isSafe": boolean, "revisedText": "string", "reason": "string"}` },
+                    { role: 'user', content: `AI Draft: "${responseText}"\nSystem Prompt context: "${systemPrompt}"` }
+                ]
+            }, { headers: { Authorization: `Bearer ${OPENAI_KEY}` }, timeout: 5000 });
+
+            let rawAudit = tribunalRes.data.choices[0].message.content.trim();
+            // Sanitize markdown if present
+            if (rawAudit.includes('```json')) rawAudit = rawAudit.split('```json')[1].split('```')[0].trim();
+            else if (rawAudit.includes('```')) rawAudit = rawAudit.split('```')[1].split('```')[0].trim();
+
+            const audit = JSON.parse(rawAudit);
+            if (!audit.isSafe) {
+                console.warn(`🛑 [TRIBUNAL] Blocked/Revised response. Reason: ${audit.reason}`);
+                responseText = audit.revisedText;
+                usedModel += ` (Tribunal Vetoed: ${audit.reason})`;
+            }
+        } catch (tribunalErr) {
+            console.warn(`⚠️ [TRIBUNAL] Validation failed (timeout or parse), proceeding with caution:`, tribunalErr.message);
+        }
+    }
+
+    // 5. VOZ (RE-ENABLED)
     if (openai && responseText) {
         try {
             console.log(`🎙️ [${botName}] Generando Audio PTT...`);
@@ -195,4 +229,27 @@ async function generateResponse({ message, history = [], botConfig = {} }) {
     return result;
 }
 
-module.exports = { generateResponse };
+/**
+ * Enterprise Feature: Universal Translation
+ * Translates any text to the owner's target language.
+ */
+async function translateForOwner(text, targetLang = 'es') {
+    if (!text || text.length < 2) return text;
+
+    try {
+        console.log(`🌍 [TRANSLATE] Translating for owner to: ${targetLang}`);
+        const result = await generateResponse({
+            message: `Translate the following message to ${targetLang}. Respond ONLY with the translation, no extra text:\n\n${text}`,
+            botConfig: {
+                bot_name: 'Translator',
+                system_prompt: 'You are a professional translator. Respond only with the translated text.'
+            }
+        });
+        return result.text.trim();
+    } catch (err) {
+        console.error('❌ Translation Error:', err.message);
+        return text; // Fallback to original
+    }
+}
+
+module.exports = { generateResponse, translateForOwner };

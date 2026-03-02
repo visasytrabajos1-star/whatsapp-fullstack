@@ -84,6 +84,8 @@ export default function PromptWizard({ onClose, onPromptGenerated, instanceName 
     const [generating, setGenerating] = useState(false);
     const [generatedPrompt, setGeneratedPrompt] = useState('');
     const [generatedPromptMeta, setGeneratedPromptMeta] = useState(null);
+    const [qaResult, setQaResult] = useState(null);
+    const [analyzing, setAnalyzing] = useState(false);
     const [copied, setCopied] = useState(false);
     const [customInput, setCustomInput] = useState('');
 
@@ -219,6 +221,23 @@ export default function PromptWizard({ onClose, onPromptGenerated, instanceName 
         onClose();
     };
 
+    const handleAnalyze = async () => {
+        if (!generatedPrompt || analyzing) return;
+        setAnalyzing(true);
+        try {
+            const { data } = await fetchJsonWithApiFallback('/api/saas/prompt-qa', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                body: JSON.stringify({ prompt: generatedPrompt })
+            });
+            setQaResult(data);
+        } catch (err) {
+            console.error("QA Error:", err);
+        } finally {
+            setAnalyzing(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-50 p-4">
             <div className="bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
@@ -253,12 +272,40 @@ export default function PromptWizard({ onClose, onPromptGenerated, instanceName 
                                 <Sparkles size={20} />
                                 <h3 className="text-lg font-bold">¡Super Prompt generado!</h3>
                             </div>
-                            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-h-64 overflow-auto">
+                            <div className="bg-slate-900 border border-slate-700 rounded-lg p-4 max-h-64 overflow-auto relative group">
                                 {generatedPromptMeta?.version && (
                                     <p className="text-xs text-cyan-300 mb-2">Versión: {generatedPromptMeta.version} · {generatedPromptMeta.fecha_creacion ? new Date(generatedPromptMeta.fecha_creacion).toLocaleString() : ''}</p>
                                 )}
                                 <pre className="text-sm text-slate-200 whitespace-pre-wrap font-mono">{generatedPrompt}</pre>
+
+                                <button
+                                    onClick={handleAnalyze}
+                                    disabled={analyzing}
+                                    className="absolute top-2 right-2 bg-slate-800/80 border border-slate-700 p-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-cyan-400 transition-all opacity-0 group-hover:opacity-100"
+                                >
+                                    {analyzing ? 'Analizando...' : '🔍 Auditoría QA'}
+                                </button>
                             </div>
+
+                            {qaResult && (
+                                <div className="bg-cyan-950/20 border border-cyan-500/30 rounded-lg p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Resultado de Auditoría AI</h4>
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${qaResult.score > 80 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                            Score: {qaResult.score}/100
+                                        </span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-300 italic mb-2">"{qaResult.critique}"</p>
+                                    <ul className="space-y-1">
+                                        {qaResult.suggestions?.map((s, i) => (
+                                            <li key={i} className="text-[10px] text-slate-400 flex items-start gap-1">
+                                                <span className="text-cyan-500">•</span> {s}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
                             <div className="flex gap-3">
                                 <button onClick={handleCopy} className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
                                     {copied ? <CheckCircle2 size={16} className="text-green-400" /> : <Copy size={16} />}

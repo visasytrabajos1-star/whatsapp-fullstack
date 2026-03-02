@@ -181,6 +181,10 @@ async function handleQRMessage(sock, msg, instanceId) {
 
         // Phase 4: Persistence (Log Message Inbound)
         if (isSupabaseEnabled) {
+            // Enterprise V3: Real-time Translation for Owner
+            const ownerLang = config.ownerLang || 'es';
+            const translatedContent = await alexBrain.translateForOwner(text, ownerLang);
+
             supabase.from('messages').insert({
                 instance_id: instanceId,
                 tenant_id: tenantId,
@@ -188,6 +192,11 @@ async function handleQRMessage(sock, msg, instanceId) {
                 customer_phone: remoteJid,
                 content: text,
                 message_type: 'text',
+                metadata: {
+                    content_original: text,
+                    content_translated: translatedContent,
+                    owner_lang: ownerLang
+                },
                 status: 'received'
             }).then(({ error }) => { if (error) console.warn('⚠️ Log inbound failed:', error.message); });
 
@@ -237,6 +246,10 @@ async function handleQRMessage(sock, msg, instanceId) {
 
             // Phase 4: Persistence (Log Message Outbound)
             if (isSupabaseEnabled) {
+                // Enterprise V3: Real-time Translation for Owner (Outbound)
+                const ownerLang = config.ownerLang || 'es';
+                const translatedOutbound = await alexBrain.translateForOwner(result.text, ownerLang);
+
                 supabase.from('messages').insert({
                     instance_id: instanceId,
                     tenant_id: tenantId,
@@ -245,7 +258,12 @@ async function handleQRMessage(sock, msg, instanceId) {
                     content: result.text,
                     message_type: 'text',
                     ai_model: result.trace?.model || 'unknown',
-                metadata: { intent: result.trace?.intent || 'general' },
+                    metadata: {
+                        intent: result.trace?.intent || 'general',
+                        content_original: result.text,
+                        content_translated: translatedOutbound,
+                        owner_lang: ownerLang
+                    },
                     status: 'sent'
                 }).then(({ error }) => { if (error) console.warn('⚠️ Log outbound failed:', error.message); });
             }
@@ -1031,6 +1049,36 @@ router.patch('/prompt-versions/:instanceId/:versionId/archive', async (req, res)
     } catch (error) {
         console.error('❌ Error archivando versión de prompt:', error.message);
         return res.status(500).json({ error: error.message || 'No se pudo archivar la versión' });
+    }
+});
+
+// Enterprise V3: Prompt QA
+router.post('/prompt-qa', async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        if (!prompt) return res.status(400).json({ error: 'Prompt es requerido' });
+
+        const result = await alexBrain.generateResponse({
+            message: `Analyze the following system prompt for a WhatsApp AI bot.
+            Score it from 0 to 100 based on clarity, safety, and operational effectiveness.
+            Provide suggestions for improvement.
+            Respond ONLY with JSON: {"score": number, "suggestions": ["string", "string"], "critique": "string"}
+
+            Prompt to analyze: "${prompt}"`,
+            botConfig: {
+                bot_name: 'PromptQA',
+                system_prompt: 'You are a Senior Prompt Engineer. You provide objective and technical audits of AI prompts.'
+            }
+        });
+
+        let rawQA = result.text.trim();
+        if (rawQA.includes('```json')) rawQA = rawQA.split('```json')[1].split('```')[0].trim();
+        else if (rawQA.includes('```')) rawQA = rawQA.split('```')[1].split('```')[0].trim();
+
+        const qaResult = JSON.parse(rawQA);
+        res.json({ success: true, ...qaResult });
+    } catch (err) {
+        res.status(500).json({ error: 'Error al analizar el prompt: ' + err.message });
     }
 });
 

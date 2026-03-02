@@ -1,0 +1,34 @@
+{
+  "login": {
+    "title": "Bem-vindo ao ALEX IO",
+    "subtitle": "Acesse seu painel de controle de IA",
+    "email": "E-mail",
+    "password": "Senha",
+    "button": "Entrar",
+    "register_link": "Não tem uma conta? Registre-se aquí",
+    "register_button": "Criar Conta",
+    "register_subtitle": "Registre-se para começar",
+    "register_tab": "Registrar-se"
+  },
+  "dashboard": {
+    "welcome": "Bem-vindo",
+    "bots_title": "Meus Bots",
+    "usage_limit": "Uso do Plano",
+    "new_bot": "Novo Bot",
+    "settings": "Configurações",
+    "analytics": "Atividade e Analítica",
+    "support": "Suporte ALEX IO",
+    "logout": "Sair",
+    "save_config": "Salvar Configuração",
+    "generate_qr": "Gerar Nuevo QR",
+    "restart": "Reiniciar Conector",
+    "admin_role": "⭐ Admin",
+    "client_role": "👤 Cliente",
+    "saving": "Salvando...",
+    "prompt_qa": {
+      "title": "Resultado da Auditoria AI",
+      "score": "Score",
+      "button": "Auditoria QA"
+    }
+  }
+}

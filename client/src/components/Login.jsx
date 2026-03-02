@@ -3,8 +3,10 @@ import { supabase } from '../supabaseClient';
 import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, ArrowLeft, Globe, Mail } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useTranslation } from 'react-i18next';
 
 export default function Login() {
+    const { t, i18n } = useTranslation();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
@@ -140,10 +142,10 @@ export default function Login() {
                 </div>
 
                 <h1 className="text-3xl font-bold text-white mb-2 text-center tracking-tight">
-                    {isSignUp ? 'Crear Cuenta' : 'Bienvenido'}
+                    {isSignUp ? t('login.register_button', 'Crear Cuenta') : t('login.title', 'Bienvenido')}
                 </h1>
                 <p className="text-slate-500 text-sm text-center mb-6">
-                    {isSignUp ? 'Registrate para empezar' : 'Ingresá a tu cuenta'}
+                    {isSignUp ? t('login.register_subtitle', 'Registrate para empezar') : t('login.subtitle', 'Ingresá a tu cuenta')}
                 </p>
 
                 {/* LOGIN / SIGNUP TOGGLE */}
@@ -152,13 +154,13 @@ export default function Login() {
                         onClick={() => { setIsSignUp(false); setMessage(''); }}
                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${!isSignUp ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                     >
-                        Iniciar Sesión
+                        {t('login.button', 'Iniciar Sesión')}
                     </button>
                     <button
                         onClick={() => { setIsSignUp(true); setMessage(''); }}
                         className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${isSignUp ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
                     >
-                        Registrarse
+                        {t('login.register_tab', 'Registrarse')}
                     </button>
                 </div>
 
@@ -187,7 +189,7 @@ export default function Login() {
                 {/* EMAIL FORM */}
                 <form onSubmit={handleAuth} className="space-y-4">
                     <div>
-                        <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-wider">Email</label>
+                        <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-wider">{t('login.email', 'Email')}</label>
                         <input
                             type="email"
                             value={email}
@@ -198,7 +200,7 @@ export default function Login() {
                         />
                     </div>
                     <div>
-                        <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-wider">Contraseña</label>
+                        <label className="block text-slate-400 text-xs font-bold mb-2 uppercase tracking-wider">{t('login.password', 'Contraseña')}</label>
                         <input
                             type="password"
                             value={password}
@@ -226,7 +228,7 @@ export default function Login() {
                         className="w-full bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold py-3.5 rounded-xl shadow-lg transition-all transform hover:-translate-y-0.5 disabled:opacity-50 flex items-center justify-center gap-2"
                     >
                         {loading && <Loader2 className="animate-spin" size={20} />}
-                        <span>{isSignUp ? 'Crear Cuenta' : 'Entrar'}</span>
+                        <span>{isSignUp ? t('login.register_button', 'Crear Cuenta') : t('login.button', 'Entrar')}</span>
                     </button>
                 </form>
 
