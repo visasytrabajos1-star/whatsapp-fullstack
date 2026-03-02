@@ -152,9 +152,13 @@ app.post('/api/auth/login', async (req, res) => {
             return res.json({ token, tenantId, role });
         }
 
-        // Fallback: passwordless (for existing users or when Supabase not configured)
-        const { token, tenantId, role } = buildToken(email);
-        res.json({ token, tenantId, role });
+        // Fallback: passwordless (Restricted to non-production only)
+        if (process.env.NODE_ENV !== 'production') {
+            const { token, tenantId, role } = buildToken(email);
+            return res.json({ token, tenantId, role });
+        }
+
+        res.status(401).json({ error: 'La autenticación por contraseña es requerida en producción.' });
     } catch (err) {
         console.error('Login error:', err.message);
         res.status(500).json({ error: 'Error al iniciar sesión' });

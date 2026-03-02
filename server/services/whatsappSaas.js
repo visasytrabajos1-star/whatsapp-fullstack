@@ -193,7 +193,7 @@ async function handleQRMessage(sock, msg, instanceId) {
 
             // CRM Sync: Try to identify and sync user to Copper
             const cleanPhone = remoteJid.split('@')[0];
-            copperService.syncUser(cleanPhone, null, null)
+            copperService.syncUser(cleanPhone, msg.pushName || null, null)
                 .then(p => p && console.log(`👤 CRM Sync Success: ${p.name}`))
                 .catch(e => console.warn('⚠️ CRM Sync failed:', e.message));
         }
