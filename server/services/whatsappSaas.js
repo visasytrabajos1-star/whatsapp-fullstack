@@ -1186,7 +1186,7 @@ const restoreSessions = async () => {
             const instanceId = session.instance_id;
             const sessionPath = `${sessionsDir}/${instanceId}`;
 
-            if (fs.existsSync(sessionPath)) {
+            if (isSupabaseEnabled || fs.existsSync(sessionPath)) {
                 console.log(`✅ [RECOVERY] Restaurando bot: ${session.company_name} (${instanceId})`);
                 const config = {
                     companyName: session.company_name,
@@ -1198,7 +1198,7 @@ const restoreSessions = async () => {
                     console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, e.message);
                 });
             } else {
-                console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Carpeta de sesión no encontrada.`);
+                console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Carpeta de sesión no encontrada y Supabase está deshabilitado.`);
                 updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).catch(() => { });
             }
         }
