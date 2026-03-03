@@ -80,6 +80,7 @@ function SaasDashboard() {
     name: '',
     provider: 'baileys',
     customPrompt: 'Eres un asistente virtual amigable y profesional.',
+    ownerLang: 'es',
     metaApiUrl: '',
     metaPhoneNumberId: '',
     metaAccessToken: '',
@@ -160,6 +161,7 @@ function SaasDashboard() {
       name: selected.name || '',
       provider: selected.provider || 'baileys',
       customPrompt: selected.customPrompt || 'Eres un asistente virtual amigable y profesional.',
+      ownerLang: selected.ownerLang || 'es',
       metaApiUrl: selected.metaApiUrl || '',
       metaPhoneNumberId: selected.metaPhoneNumberId || '',
       metaAccessToken: selected.metaAccessToken || '',
@@ -255,6 +257,7 @@ function SaasDashboard() {
         body: JSON.stringify({
           companyName: name,
           customPrompt: `Eres un asistente virtual de ${name}`,
+          ownerLang: 'es',
           provider,
           metaApiUrl: '',
           metaPhoneNumberId: '',
@@ -606,11 +609,24 @@ function SaasDashboard() {
                     <input className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.name} onChange={(e) => setConfigDraft((prev) => ({ ...prev, name: e.target.value }))} />
                   </div>
 
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp (QR o Cloud)</label>
-                    <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
-                      {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp (QR o Cloud)</label>
+                      <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
+                        {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm text-slate-400 mb-1">Idioma del Inbox (Dueño)</label>
+                      <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.ownerLang} onChange={(e) => setConfigDraft((prev) => ({ ...prev, ownerLang: e.target.value }))}>
+                        <option value="es">Español</option>
+                        <option value="en">English</option>
+                        <option value="pt">Português</option>
+                        <option value="fr">Français</option>
+                        <option value="de">Deutsch</option>
+                        <option value="zh">Mandarin</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>

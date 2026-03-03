@@ -461,7 +461,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 
 // --- ENDPOINTS ---
 router.post('/connect', async (req, res) => {
-    const { companyName, customPrompt, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
+    const { companyName, customPrompt, ownerLang, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
     const cleanName = String(companyName || '').trim();
 
     if (!cleanName) {
@@ -473,6 +473,7 @@ router.post('/connect', async (req, res) => {
     const config = {
         companyName: cleanName,
         customPrompt,
+        ownerLang: ownerLang || 'es',
         provider,
         tenantId,
         ownerEmail: req.tenant?.email || '',
