@@ -77,7 +77,7 @@ const bcrypt = require('bcryptjs');
 const { JWT_SECRET } = require('./middleware/auth');
 const { supabase, isSupabaseEnabled } = require('./services/supabaseClient');
 
-const ADMIN_EMAILS = ['visasytrabajos@gmail.com', 'admin@demo.com'];
+const ADMIN_EMAILS = ['visasytrabajos@gmail.com', 'admin@demo.com', 'admin@alex.io'];
 
 const buildToken = (email, role) => {
     const isAdmin = ADMIN_EMAILS.includes(email.toLowerCase().trim()) || role === 'SUPERADMIN';
@@ -179,7 +179,7 @@ if (frontendPath) {
 app.get('/api/status', (req, res) => {
     res.json({
         status: 'online',
-        version: '2.0.4.16',
+        version: '2.1.0',
         platform: 'ALEX IO SAAS',
         features: ['V6 Protocol Hardening', 'V8 Multi-Tenancy', 'TTS Voice'],
         users: 'Optimized for scale'
