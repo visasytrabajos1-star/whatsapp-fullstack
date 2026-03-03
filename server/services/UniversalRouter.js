@@ -14,16 +14,16 @@ const OpenAI = require("openai");
 // --- CONFIGURACIÓN DE MODELOS ---
 const MODELS = {
     ALEX: {
-        PRIMARY: { provider: 'GOOGLE', model: 'gemini-1.5-flash', timeout: 4000 },
-        BACKUP: { provider: 'GOOGLE', model: 'gemini-1.5-pro' } // Misma API, diferente modelo
+        PRIMARY: { provider: 'GOOGLE', model: 'gemini-2.0-flash', timeout: 4000 },
+        BACKUP: { provider: 'GOOGLE', model: 'gemini-2.0-flash-lite' } // Misma API, diferente modelo
     },
     TALKME: {
-        PRIMARY: { provider: 'GOOGLE', model: 'gemini-1.5-flash', timeout: 3500 },
+        PRIMARY: { provider: 'GOOGLE', model: 'gemini-2.0-flash', timeout: 3500 },
         BACKUP: { provider: 'OPENAI', model: 'gpt-4o-mini' } // Simulation: using OpenAI as DeepSeek proxy usually follows same structure
         // NOTE: DeepSeek usually compatible with OpenAI SDK by changing baseURL
     },
     ROLEPLAY: {
-        PRIMARY: { provider: 'GOOGLE', model: 'gemini-1.5-pro', timeout: 5000 }, // Needs time to think deep
+        PRIMARY: { provider: 'GOOGLE', model: 'gemini-2.5-flash', timeout: 5000 }, // Needs time to think deep
         BACKUP: { provider: 'OPENAI', model: 'gpt-4o' } // The big gun
     }
 };

@@ -13,10 +13,10 @@ const deadKeys = new Set();
 const KEY_COOLDOWN_MS = 3600000; // 1 hour
 
 // --- CONSTANTS ---
-const OPENAI_KEY = process.env.OPENAI_API_KEY || process.env.OPENAI_KEY;
-const GEMINI_KEY = process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY || process.env.GOOGLE_API_KEY;
-const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY;
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY; // Para Shadow Audit
+const OPENAI_KEY = (process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || '').trim();
+const GEMINI_KEY = (process.env.GEMINI_API_KEY || process.env.GENAI_API_KEY || process.env.GOOGLE_API_KEY || '').trim();
+const DEEPSEEK_KEY = (process.env.DEEPSEEK_API_KEY || '').trim();
+const ANTHROPIC_KEY = (process.env.ANTHROPIC_API_KEY || '').trim(); // Para Shadow Audit
 
 // --- UTILS ---
 
@@ -111,10 +111,9 @@ async function generateResponse({ message, history = [], botConfig = {}, isAudio
     if (GEMINI_KEY && GEMINI_KEY.length > 20 && !deadKeys.has('GEMINI')) {
         // Try multiple Gemini versions/models
         const gems = [
-            { v: 'v1beta', m: 'gemini-2.0-flash-exp' }, // Try experimental if latest fails
-            { v: 'v1beta', m: 'gemini-1.5-flash-latest' },
-            { v: 'v1', m: 'gemini-1.5-flash' },
-            { v: 'v1beta', m: 'gemini-pro' } // Fallback to pro if flash is saturated
+            { v: 'v1beta', m: 'gemini-2.0-flash' },
+            { v: 'v1beta', m: 'gemini-2.0-flash-lite' },
+            { v: 'v1beta', m: 'gemini-2.5-flash' }
         ];
 
         for (const g of gems) {
@@ -299,7 +298,7 @@ async function extractLeadInfo({ history = [], systemPrompt }) {
 
     try {
         console.log(`🤖 [LeadExtractor] Analizando conversación de ${history.length} mensajes...`);
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
 
         const contents = [];
         // Analizar últimos 8 mensajes para contexto
@@ -387,7 +386,7 @@ async function translateIncomingMessage(text, targetLang = 'es') {
     }
 
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
         const prompt = `Analiza el texto. Si ya está en idioma ISO '${targetLang}', devuelve exacto el mismo texto. Si está en OTRO idioma, tradúcelo de forma natural a '${targetLang}'. Devuelve SOLO la traducción o el texto original, sin explicaciones, comillas ni prefijos. Texto: "${text}"`;
 
         const payload = {

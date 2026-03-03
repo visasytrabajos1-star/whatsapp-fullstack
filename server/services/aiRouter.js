@@ -22,7 +22,7 @@ async function generateResponse(userMessage, personaKey = 'ALEX_MIGRATION', user
 
     // 1. GEMINI (FREE TIER)
     if (GEMINI_KEY && GEMINI_KEY.length > 30) {
-        const configs = [{ v: 'v1beta', m: 'gemini-1.5-flash' }, { v: 'v1', m: 'gemini-1.5-flash' }];
+        const configs = [{ v: 'v1beta', m: 'gemini-2.0-flash' }, { v: 'v1beta', m: 'gemini-2.0-flash-lite' }];
         for (const conf of configs) {
             if (responseText) break;
             try {
