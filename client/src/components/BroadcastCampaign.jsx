@@ -7,8 +7,9 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
     const [message, setMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [result, setResult] = useState(null);
+    const [confirmModal, setConfirmModal] = useState(null);
 
-    const handleSend = async () => {
+    const handleSend = () => {
         if (!phonesText.trim() || !message.trim()) return;
 
         // Parse phones (split by comma, newline, or space, remove empty strings, keep only digits)
@@ -16,12 +17,17 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
         const cleanedPhones = rawPhones.map(p => p.replace(/\D/g, '')).filter(p => p.length > 8);
 
         if (cleanedPhones.length === 0) {
-            alert("No se encontraron números de teléfono válidos.");
+            setResult({ success: false, error: "No se encontraron números de teléfono válidos." });
             return;
         }
 
-        const confirmSend = window.confirm(`Estás a punto de enviar una campaña a ${cleanedPhones.length} contactos desde la instancia "${instanceName}".\n\n¿Estás seguro? Las políticas de WhatsApp penalizan el SPAM masivo.`);
-        if (!confirmSend) return;
+        setConfirmModal({ count: cleanedPhones.length, phones: cleanedPhones });
+    };
+
+    const executeBroadcast = async () => {
+        if (!confirmModal) return;
+        const cleanedPhones = confirmModal.phones;
+        setConfirmModal(null);
 
         setLoading(true);
         setResult(null);
@@ -55,7 +61,26 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
     };
 
     return (
-        <div className="bg-slate-900 border border-slate-700 rounded-xl p-6">
+        <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 relative">
+            {confirmModal && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+                    <div className="bg-slate-800 border border-slate-700 rounded-xl p-6 w-full max-w-sm">
+                        <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-orange-400">
+                            <AlertTriangle size={24} /> Confirmar Envío
+                        </h3>
+                        <p className="text-slate-300 mb-6 text-sm">
+                            Estás a punto de enviar una campaña masiva a <strong>{confirmModal.count}</strong> contactos desde la cuenta "{instanceName}".
+                            <br /><br />
+                            <span className="text-xs text-orange-300">⚠️ Recomendamos enviar en lotes menores a 50 si tu número no está validado, ya que Meta penaliza activamente el SPAM.</span>
+                        </p>
+                        <div className="flex gap-4">
+                            <button onClick={() => setConfirmModal(null)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-2 rounded-lg transition-colors">Cancelar</button>
+                            <button onClick={executeBroadcast} className="flex-1 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white font-bold py-2 rounded-lg transition-colors">Confirmar y Enviar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
                 <Send size={20} className="text-fuchsia-500" /> Campaña Broadcast (Masiva)
             </h3>
