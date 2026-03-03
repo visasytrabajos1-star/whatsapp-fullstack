@@ -1,5 +1,6 @@
 const baileys = require('@whiskeysockets/baileys');
 const { makeWASocket, DisconnectReason, downloadMediaMessage } = baileys;
+const axios = require('axios');
 const useSupabaseAuthState = require('./useSupabaseAuthState');
 const fetchLatestBaileysVersion = baileys.fetchLatestBaileysVersion || null;
 const Browsers = baileys.Browsers || null;
@@ -269,6 +270,8 @@ async function handleQRMessage(sock, msg, instanceId) {
             translation_model: translationResult.model || 'none'
         }).then(({ error }) => {
             if (error) console.warn(`⚠️ [${instanceId}] Error logging inbound message:`, error.message);
+        }).catch(err => {
+            console.warn(`⚠️ [${instanceId}] Unhandled Supabase error (Inbound):`, err.message);
         });
     }
 
@@ -463,7 +466,11 @@ async function handleQRMessage(sock, msg, instanceId) {
                             messageId,
                             supabase
                         }).catch(e => console.error('Shadow Audit unhandled rejection:', e));
+                    } else if (error) {
+                        console.warn(`⚠️ [${instanceId}] Error logging outbound message:`, error.message);
                     }
+                }).catch(err => {
+                    console.warn(`⚠️ [${instanceId}] Unhandled Supabase error (Outbound):`, err.message);
                 });
 
                 // Increment Usage
@@ -1690,8 +1697,8 @@ router.post('/broadcast', async (req, res) => {
 
                 try {
                     if (config.provider === 'baileys') {
-                        const sock = global.whatsappSessions?.get(instanceId);
-                        if (!sock) throw new Error('Bot no conectado');
+                const sock = activeSessions.get(instanceId);
+                if (!sock) throw new Error('Bot no conectado');
                         await sock.sendMessage(jid, { text: message });
                     } else if (config.provider === 'meta') {
                         await axios.post(
