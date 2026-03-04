@@ -44,6 +44,20 @@ test('authenticateTenant returns 401 when Authorization header is missing', () =
     assert.equal(res.body.code, 'AUTH_REQUIRED');
 });
 
+test('authenticateTenant returns 401 when bearer token is empty', () => {
+    const req = { headers: { authorization: 'Bearer   ' } };
+    const res = createRes();
+    let called = false;
+
+    authenticateTenant(req, res, () => {
+        called = true;
+    });
+
+    assert.equal(called, false);
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.body.code, 'AUTH_REQUIRED');
+});
+
 test('authenticateTenant returns 403 when token is invalid', () => {
     const req = { headers: { authorization: 'Bearer invalid.token.value' } };
     const res = createRes();

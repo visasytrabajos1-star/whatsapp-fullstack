@@ -23,7 +23,13 @@ const authenticateTenant = async (req, res, next) => {
         });
     }
 
-    const token = authHeader.split(' ')[1];
+    const token = authHeader.split(' ')[1]?.trim();
+    if (!token) {
+        return res.status(401).json({
+            error: 'No se proporcionó un token de acceso válido.',
+            code: 'AUTH_REQUIRED'
+        });
+    }
 
     try {
         const unverified = jwt.decode(token);
