@@ -26,7 +26,7 @@ RUN npm install
 COPY server/ .
 
 # Copy built frontend assets from Stage 1
-COPY --from=client-builder /app/client/dist /app/client/dist
+COPY --from=client-builder /app/client/build /app/client/build
 
 # Expose port
 EXPOSE 3000
