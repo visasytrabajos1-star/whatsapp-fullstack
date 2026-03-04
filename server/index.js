@@ -179,8 +179,26 @@ const frontendPath = fs.existsSync(clientBuildPath) ? clientBuildPath :
     fs.existsSync(clientDistPath) ? clientDistPath : null;
 
 if (frontendPath) {
-    app.use(express.static(frontendPath));
-    logger.info(`📦 Frontend served from ${frontendPath}`);
+    // index.html: never cache (ensures fresh version after deploy)
+    app.get('/', (req, res) => {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        res.sendFile(path.join(frontendPath, 'index.html'));
+    });
+
+    // Hashed assets (JS/CSS): cache aggressively (filename changes on rebuild)
+    app.use(express.static(frontendPath, {
+        maxAge: '1y',
+        immutable: true,
+        setHeaders: (res, filePath) => {
+            if (filePath.endsWith('.html')) {
+                res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+            }
+        }
+    }));
+
+    logger.info(`📦 Frontend served from ${frontendPath} (cache-hardened)`);
 }
 
 // --- ROUTES ---
@@ -214,6 +232,9 @@ app.get('/api/health', (req, res) => {
 // --- SPA CATCH-ALL (must be AFTER all API routes) ---
 if (frontendPath) {
     app.get('*', (req, res) => {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
         res.sendFile(path.join(frontendPath, 'index.html'));
     });
 }

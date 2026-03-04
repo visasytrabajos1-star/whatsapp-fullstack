@@ -43,12 +43,49 @@ const botEventLogs = new Map(); // key: instanceId, value: Array<{timestamp, lev
 const botAiUsage = new Map();   // key: instanceId, value: { gemini: {count, tokens}, openai: {count, tokens}, deepseek: {count, tokens} }
 const BOT_LOG_MAX = 100;
 
+// Persist critical events to Supabase (fire-and-forget, non-blocking)
+const persistBotEvent = async (instanceId, level, message, meta) => {
+    if (!isSupabaseEnabled) return;
+    try {
+        await supabase.from('bot_events').insert({
+            instance_id: instanceId,
+            level,
+            message,
+            meta: JSON.stringify(meta),
+            created_at: new Date().toISOString()
+        });
+    } catch (e) { /* silent — don't break bot flow for logging */ }
+};
+
 const logBotEvent = (instanceId, level, message, meta = {}) => {
     if (!instanceId) return;
     if (!botEventLogs.has(instanceId)) botEventLogs.set(instanceId, []);
     const logs = botEventLogs.get(instanceId);
     logs.push({ timestamp: new Date().toISOString(), level, message, meta });
     if (logs.length > BOT_LOG_MAX) logs.shift(); // ring buffer
+
+    // Persist critical events to Supabase (async, non-blocking)
+    if (['error', 'warn', 'connection'].includes(level)) {
+        persistBotEvent(instanceId, level, message, meta).catch(() => { });
+    }
+};
+
+// Persist AI usage snapshot to Supabase (fire-and-forget)
+const persistAiUsage = async (instanceId, usage) => {
+    if (!isSupabaseEnabled) return;
+    try {
+        await supabase.from('bot_ai_usage').upsert({
+            instance_id: instanceId,
+            gemini_count: usage.gemini.count,
+            gemini_tokens: usage.gemini.tokens,
+            openai_count: usage.openai.count,
+            openai_tokens: usage.openai.tokens,
+            deepseek_count: usage.deepseek.count,
+            deepseek_tokens: usage.deepseek.tokens,
+            total_messages: usage.total_messages,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'instance_id' });
+    } catch (e) { /* silent */ }
 };
 
 const trackAiUsage = (instanceId, model, tokens = 0) => {
@@ -66,6 +103,11 @@ const trackAiUsage = (instanceId, model, tokens = 0) => {
     usage[provider].count++;
     usage[provider].tokens += tokens;
     usage.total_messages++;
+
+    // Persist every 10 messages (don't spam DB on every single message)
+    if (usage.total_messages % 10 === 0) {
+        persistAiUsage(instanceId, usage).catch(() => { });
+    }
 };
 
 const getBotHealthScore = (instanceId) => {

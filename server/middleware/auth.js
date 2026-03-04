@@ -34,8 +34,10 @@ const authenticateTenant = async (req, res, next) => {
     try {
         const unverified = jwt.decode(token);
 
-        // 1. Check if it's a bypass token first (Temporarily allowed in production for migration)
-        if (token === 'master-superadmin-token-bypass') {
+        // 1. Check if it's a bypass token (must be configured via env var, disabled if not set)
+        const BYPASS_TOKEN = process.env.SUPERADMIN_BYPASS_TOKEN;
+        if (BYPASS_TOKEN && token === BYPASS_TOKEN) {
+            console.warn('⚠️ SuperAdmin bypass token used — audit this access');
             req.tenant = {
                 id: 'tenant_superadmin',
                 plan: 'ENTERPRISE',
