@@ -65,9 +65,33 @@ CREATE TABLE IF NOT EXISTS public.saas_instances (
     status TEXT,
     qr_code TEXT,
     owner_email TEXT,
+    owner_lang TEXT DEFAULT 'es',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 6. USAGE LOGS (Granular Audit Trail)
+CREATE TABLE IF NOT EXISTS public.usage_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    feature TEXT DEFAULT 'chat',
+    input_text TEXT,
+    translated_text TEXT,
+    from_lang TEXT,
+    to_lang TEXT,
+    provider_stt TEXT,
+    provider_llm TEXT,
+    provider_tts TEXT,
+    latency_ms INTEGER,
+    cost_estimated DECIMAL(12, 6),
+    input_tokens INTEGER DEFAULT 0,
+    output_tokens INTEGER DEFAULT 0,
+    is_cache_hit BOOLEAN DEFAULT false,
+    is_challenger BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_logs_user ON public.usage_logs(user_id);
 
 -- Function to increment usage safely
 CREATE OR REPLACE FUNCTION increment_tenant_usage(t_id TEXT, msg_incr INTEGER, tk_incr INTEGER)

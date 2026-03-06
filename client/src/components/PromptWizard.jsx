@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Sparkles, ChevronRight, ChevronLeft, Loader, Wand2, Copy, CheckCircle2 } from 'lucide-react';
-import { fetchJsonWithApiFallback } from '../api';
+import { useTranslation } from 'react-i18next';
+import { fetchJsonWithApiFallback, getAuthHeaders } from '../api';
 
 const STEPS = [
     {
@@ -65,6 +66,7 @@ const STEPS = [
 ];
 
 export default function PromptWizard({ onClose, onPromptGenerated, instanceName }) {
+    const { t } = useTranslation();
     const [step, setStep] = useState(0);
     const [answers, setAnswers] = useState({
         businessType: '',
@@ -283,16 +285,16 @@ export default function PromptWizard({ onClose, onPromptGenerated, instanceName 
                                     disabled={analyzing}
                                     className="absolute top-2 right-2 bg-slate-800/80 border border-slate-700 p-1.5 rounded-md text-[10px] font-bold text-slate-400 hover:text-cyan-400 transition-all opacity-0 group-hover:opacity-100"
                                 >
-                                    {analyzing ? 'Analizando...' : '🔍 Auditoría QA'}
+                                    {analyzing ? t('dashboard.prompt_qa.analyzing', 'Analizando...') : `🔍 ${t('dashboard.prompt_qa.button', 'Auditoría QA')}`}
                                 </button>
                             </div>
 
                             {qaResult && (
                                 <div className="bg-cyan-950/20 border border-cyan-500/30 rounded-lg p-3">
                                     <div className="flex items-center justify-between mb-2">
-                                        <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Resultado de Auditoría AI</h4>
+                                        <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">{t('dashboard.prompt_qa.title', 'Resultado de Auditoría AI')}</h4>
                                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${qaResult.score > 80 ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                                            Score: {qaResult.score}/100
+                                            {t('dashboard.prompt_qa.score', 'Score')}: {qaResult.score}/100
                                         </span>
                                     </div>
                                     <p className="text-[11px] text-slate-300 italic mb-2">"{qaResult.critique}"</p>

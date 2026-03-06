@@ -1,16 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-let supabase = null;
-if (supabaseUrl && supabaseKey) {
-    try {
-        supabase = createClient(supabaseUrl, supabaseKey);
-    } catch (e) {
-        console.warn("⚠️ Failed to initialize Supabase client:", e.message);
-    }
-}
+const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 
 // Pricing Constants (Approximate USD) can be moved to DB
 const PRICING = {
@@ -32,9 +20,12 @@ const UsageLogger = {
         providers, // { stt, llm, tts }
         latencyMs,
         isCacheHit,
-        isChallenger
+        isChallenger,
+        feature = 'chat',
+        inputTokens = 0,
+        outputTokens = 0
     }) {
-        if (!supabase) return;
+        if (!isSupabaseEnabled) return;
         try {
             // 1. Calculate Estimated Cost
             let cost = 0;
@@ -64,13 +55,16 @@ const UsageLogger = {
                     translated_text: translatedText,
                     from_lang: fromLang,
                     to_lang: toLang,
-                    provider_stt: providers.stt,
-                    provider_llm: providers.llm,
-                    provider_tts: providers.tts,
+                    provider_stt: providers?.stt,
+                    provider_llm: providers?.llm,
+                    provider_tts: providers?.tts,
                     latency_ms: latencyMs,
                     cost_estimated: cost,
                     is_cache_hit: isCacheHit,
-                    is_challenger: isChallenger
+                    is_challenger: isChallenger,
+                    feature,
+                    input_tokens: inputTokens,
+                    output_tokens: outputTokens
                 });
 
             if (error) console.error("Stats Log Error:", error);

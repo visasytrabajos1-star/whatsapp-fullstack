@@ -10,6 +10,7 @@ const router = express.Router();
 const alexBrain = require('./alexBrain');
 const useSupabaseAuthState = require('./supabaseAuthState');
 const copperService = require('./copperService');
+const usageLogger = require('./usageLogger');
 const templates = require('../config/templates');
 const { supabase, isSupabaseEnabled } = require('./supabaseClient');
 const {
@@ -61,6 +62,7 @@ const updateSessionStatus = async (instanceId, status, extra = {}) => {
     if (memoryConfig && memoryConfig.tenantId) {
         payload.tenant_id = memoryConfig.tenantId;
         payload.owner_email = memoryConfig.ownerEmail || null;
+        payload.owner_lang = memoryConfig.ownerLang || 'es';
     }
 
     const { provider, ...dbPayload } = payload;
@@ -86,7 +88,7 @@ const hydrateSessionStatus = async () => {
 
         const { data, error } = await supabase
             .from(sessionsTable)
-            .select('instance_id,status,qr_code,updated_at,company_name')
+            .select('instance_id,status,qr_code,updated_at,company_name,owner_lang')
             .order('updated_at', { ascending: false })
             .limit(200);
 
@@ -101,6 +103,7 @@ const hydrateSessionStatus = async () => {
                 qr_code: row.qr_code,
                 updatedAt: row.updated_at,
                 companyName: row.company_name,
+                ownerLang: row.owner_lang || 'es',
                 provider: null
             });
         }
@@ -185,6 +188,9 @@ async function handleQRMessage(sock, msg, instanceId) {
             const ownerLang = config.ownerLang || 'es';
             const translatedContent = await alexBrain.translateForOwner(text, ownerLang);
 
+            // Enterprise V3: Audit Trail (Immutable Hash)
+            const messageHash = crypto.createHash('sha256').update(`${instanceId}:${remoteJid}:${text}:${Date.now()}`).digest('hex');
+
             supabase.from('messages').insert({
                 instance_id: instanceId,
                 tenant_id: tenantId,
@@ -195,7 +201,8 @@ async function handleQRMessage(sock, msg, instanceId) {
                 metadata: {
                     content_original: text,
                     content_translated: translatedContent,
-                    owner_lang: ownerLang
+                    owner_lang: ownerLang,
+                    audit_hash: messageHash
                 },
                 status: 'received'
             }).then(({ error }) => { if (error) console.warn('⚠️ Log inbound failed:', error.message); });
@@ -250,6 +257,9 @@ async function handleQRMessage(sock, msg, instanceId) {
                 const ownerLang = config.ownerLang || 'es';
                 const translatedOutbound = await alexBrain.translateForOwner(result.text, ownerLang);
 
+                // Enterprise V3: Audit Trail (Outbound Hash)
+                const outboundHash = crypto.createHash('sha256').update(`${instanceId}:${remoteJid}:${result.text}:${Date.now()}`).digest('hex');
+
                 supabase.from('messages').insert({
                     instance_id: instanceId,
                     tenant_id: tenantId,
@@ -262,7 +272,8 @@ async function handleQRMessage(sock, msg, instanceId) {
                         intent: result.trace?.intent || 'general',
                         content_original: result.text,
                         content_translated: translatedOutbound,
-                        owner_lang: ownerLang
+                        owner_lang: ownerLang,
+                        audit_hash: outboundHash
                     },
                     status: 'sent'
                 }).then(({ error }) => { if (error) console.warn('⚠️ Log outbound failed:', error.message); });
@@ -304,6 +315,21 @@ async function handleQRMessage(sock, msg, instanceId) {
                 console.warn(`⚠️ [${config.companyName}] No se pudo enviar audio:`, audioErr.message);
             }
         }
+
+        // Phase 5: Log detailed usage (Async)
+        usageLogger.logTransaction({
+            userId: tenantId,
+            inputText: text,
+            translatedText: result.text,
+            fromLang: 'unknown',
+            toLang: config.ownerLang || 'es',
+            providers: { llm: result.trace?.model },
+            latencyMs: 0,
+            feature: 'whatsapp_saas',
+            inputTokens: text.length / 4,
+            outputTokens: (result.text || '').length / 4
+        }).catch(() => { });
+
     } catch (err) {
         console.error(`❌ [${instanceId}] Error handling message:`, err.message);
     }
@@ -380,7 +406,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
             updateSessionStatus(instanceId, 'disconnected', {
                 companyName: config.companyName,
                 qr_code: null
-            }).then(({ error }) => { if (error) console.warn('⚠️ Disconnect status sync failed:', error.message); });
+            }).catch(() => null);
 
             // Permanent errors that should NOT trigger reconnection
             // 411: Multi-device mismatch / Bad MAC
@@ -403,7 +429,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
                     companyName: config.companyName,
                     qr_code: null,
                     error: `WhatsApp rechazó la conexión (código ${closeCode}). Reintenta desde el dashboard.`
-                }).then(({ error }) => { if (error) console.warn('⚠️ Fatal status sync failed:', error.message); });
+                }).catch(() => null);
 
                 if (res && !res.headersSent) {
                     res.status(503).json({
@@ -423,7 +449,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
                 updateSessionStatus(instanceId, 'failed_max_retries', {
                     companyName: config.companyName,
                     qr_code: null
-                }).then(({ error }) => { if (error) console.warn('⚠️ Max retries status sync failed:', error.message); });
+                }).catch(() => null);
 
                 if (res && !res.headersSent) {
                     res.status(503).json({
@@ -440,7 +466,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
             updateSessionStatus(instanceId, 'online', {
                 companyName: config.companyName,
                 qr_code: null
-            }).then(({ error }) => { if (error) console.warn('⚠️ Online status sync failed:', error.message); });
+            }).catch(() => null);
             console.log(`✅ [${instanceId}] ${config.companyName} ONLINE!`);
         }
     });
@@ -705,6 +731,26 @@ router.post('/instance/:instanceId/restart', async (req, res) => {
 
 router.get('/templates', (req, res) => {
     res.json({ success: true, templates });
+});
+
+router.get('/logs/:instanceId', async (req, res) => {
+    try {
+        const { instanceId } = req.params;
+        const tenantId = req.tenant?.id;
+        if (!instanceId || !isSupabaseEnabled) return res.json({ success: true, logs: [] });
+
+        const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('instance_id', instanceId)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw error;
+        return res.json({ success: true, logs: data || [] });
+    } catch (e) {
+        return res.status(500).json({ error: e.message });
+    }
 });
 
 router.get('/analytics', async (req, res) => {
@@ -1119,14 +1165,15 @@ const restoreSessions = async () => {
                     companyName: session.company_name,
                     tenantId: session.tenant_id,
                     ownerEmail: session.owner_email,
+                    ownerLang: session.owner_lang || 'es',
                     provider: 'baileys'
                 };
-                connectToWhatsApp(instanceId, config).then(({ error }) => {
-                    if (error) console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, error.message);
+                connectToWhatsApp(instanceId, config).catch(e => {
+                    console.error(`❌ [RECOVERY] Falló restauración de ${instanceId}:`, e.message);
                 });
             } else {
                 console.warn(`⚠️ [RECOVERY] Saltando ${instanceId}: Sesión no encontrada localmente y Supabase Auth desactivado.`);
-                updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).then(({ error }) => { if (error) console.warn('⚠️ Recovery status sync failed:', error.message); });
+                updateSessionStatus(instanceId, 'disconnected', { companyName: session.company_name }).catch(() => { });
             }
         }
     } catch (err) {

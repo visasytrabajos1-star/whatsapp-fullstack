@@ -130,10 +130,8 @@ function SaasDashboard() {
           phone: s.phone || (s.provider === 'baileys' ? 'WhatsApp Web' : 'Cloud API')
         })));
         if (data.sessions.length > 0) {
-          setLogs([
-            { text: 'Quiero información', ai_model: 'gemini-flash', timestamp: new Date() },
-            { text: '¿Cual es el precio?', ai_model: 'gemini-flash', timestamp: new Date(Date.now() - 60000) }
-          ]);
+          // Fetch real recent logs for the first/selected instance
+          fetchRealLogs(data.sessions[0].instanceId);
         }
       }
     } catch (e) {
@@ -420,6 +418,22 @@ function SaasDashboard() {
     }
   };
 
+  const fetchRealLogs = async (instanceId) => {
+    if (!instanceId) return;
+    try {
+      const { data } = await fetchJsonWithApiFallback(`/api/saas/logs/${instanceId}`, { headers: { ...getAuthHeaders() } });
+      if (data.success && data.logs) {
+        setLogs(data.logs.map(l => ({
+          text: l.content,
+          direction: l.direction,
+          ai_model: l.ai_model,
+          metadata: l.metadata,
+          timestamp: l.created_at
+        })));
+      }
+    } catch (e) { console.error("Error fetching logs:", e); }
+  };
+
   const handleSaveConfig = async () => {
     if (!selected) return;
 
@@ -580,7 +594,7 @@ function SaasDashboard() {
           <h2 className="text-xs font-bold uppercase text-slate-500 tracking-widest mb-4">{t('dashboard.bots_title', 'Mis Bots')}</h2>
           <div className="space-y-2 flex-1 overflow-auto">
             {instances.map((inst) => (
-              <button key={inst.id} onClick={() => setSelected(inst)} className={`w-full text-left p-3 rounded-lg flex items-center justify-between ${selected?.id === inst.id ? 'bg-blue-600' : 'bg-slate-900 hover:bg-slate-800'}`}>
+              <button key={inst.id} onClick={() => { setSelected(inst); fetchRealLogs(inst.instanceId); }} className={`w-full text-left p-3 rounded-lg flex items-center justify-between ${selected?.id === inst.id ? 'bg-blue-600' : 'bg-slate-900 hover:bg-slate-800'}`}>
                 <div>
                   <div className="font-medium">{inst.name}</div>
                   <div className="text-xs text-slate-400">{inst.phone}</div>
@@ -746,10 +760,15 @@ function SaasDashboard() {
                       <div className="space-y-4">
                         {logs.map((log, idx) => (
                           <div key={idx} className="border-l-2 border-slate-700 pl-3 py-1">
-                            <p className="text-slate-200 font-medium">"{log.text}"</p>
+                            <p className="text-slate-200 font-medium">
+                              "{log.metadata?.content_translated || log.text}"
+                            </p>
+                            {log.metadata?.content_original && log.metadata.content_original !== (log.metadata.content_translated || log.text) && (
+                              <p className="text-[10px] text-slate-500 italic mt-0.5">Original: {log.metadata.content_original.substring(0, 50)}...</p>
+                            )}
                             <p className="text-[10px] text-slate-500 mt-1 uppercase tracking-widest font-bold flex items-center gap-2">
-                              <span>Respondido por</span>
-                              <span className="text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded border border-blue-400/20">{log.ai_model || 'gemini-flash'}</span>
+                              <span>{log.direction === 'inbound' ? 'Recibido' : 'Respondido por'}</span>
+                              <span className="text-blue-400 bg-blue-400/10 px-1.5 py-0.5 rounded border border-blue-400/20">{log.ai_model || (log.direction === 'inbound' ? 'Usuario' : 'gemini-flash')}</span>
                             </p>
                           </div>
                         ))}

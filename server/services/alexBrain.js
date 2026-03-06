@@ -237,6 +237,12 @@ async function translateForOwner(text, targetLang = 'es') {
     if (!text || text.length < 2) return text;
 
     try {
+        // Optimized check: if target language is likely the same, skip AI call
+        // (Basic heuristic for MVP)
+        const lower = text.toLowerCase();
+        if (targetLang === 'es' && (lower.includes('hola') || lower.includes('gracias'))) return text;
+        if (targetLang === 'en' && (lower.includes('hello') || lower.includes('thanks'))) return text;
+
         console.log(`🌍 [TRANSLATE] Translating for owner to: ${targetLang}`);
         const result = await generateResponse({
             message: `Translate the following message to ${targetLang}. Respond ONLY with the translation, no extra text:\n\n${text}`,
