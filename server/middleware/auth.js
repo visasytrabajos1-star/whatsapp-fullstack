@@ -1,13 +1,13 @@
 const jwt = require('jsonwebtoken');
 const { supabase, isSupabaseEnabled } = require('../services/supabaseClient');
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
-    throw new Error('⛔ JWT_SECRET is required in production. Set it in your Render Dashboard environment variables.');
-}
-
-const getJwtSecret = () => JWT_SECRET || 'alex-io-dev-secret-2026';
+const getJwtSecret = () => {
+    const secret = process.env.JWT_SECRET;
+    if (!secret && process.env.NODE_ENV === 'production') {
+        console.error('⛔ JWT_SECRET is not set in production! Authentication will fail.');
+    }
+    return secret || 'alex-io-dev-secret-2026';
+};
 
 
 /**
