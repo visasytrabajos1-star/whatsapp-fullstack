@@ -209,9 +209,17 @@ async function handleQRMessage(sock, msg, instanceId) {
 
             // CRM Sync: Try to identify and sync user to Copper
             const cleanPhone = remoteJid.split('@')[0];
-            copperService.syncUser(cleanPhone, msg.pushName || null, null)
-                .then(p => p && console.log(`👤 CRM Sync Success: ${p.name}`))
-                .catch(e => console.warn('⚠️ CRM Sync failed:', e.message));
+
+            // Enterprise V3: Lead Validation (KYC Lite)
+            const isPotentialSpam = cleanPhone.length < 8 || /^(0123|1111|9999)/.test(cleanPhone);
+
+            if (!isPotentialSpam) {
+                copperService.syncUser(cleanPhone, msg.pushName || null, null)
+                    .then(p => p && console.log(`👤 CRM Sync Success: ${p.name}`))
+                    .catch(e => console.warn('⚠️ CRM Sync failed:', e.message));
+            } else {
+                console.warn(`🛡️ [KYC] Lead validation failed for ${cleanPhone} (potential spam). Skipping CRM sync.`);
+            }
         }
 
         // AI Memory: Fetch recent history from Supabase
