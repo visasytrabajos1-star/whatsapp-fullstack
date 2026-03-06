@@ -96,7 +96,7 @@ const buildToken = (email, role) => {
 };
 
 // POST /api/auth/register
-app.post('/api/auth/register', async (req, res) => {
+app.post('/api/auth/register', sensitiveLimiter, async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email y contraseña son requeridos' });
     if (password.length < 6) return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' });
@@ -130,19 +130,26 @@ app.post('/api/auth/register', async (req, res) => {
 });
 
 // POST /api/auth/login
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', sensitiveLimiter, async (req, res) => {
     const { email, password } = req.body;
     if (!email) return res.status(400).json({ error: 'Email es requerido' });
 
-    // Admin bypass block removed for security
-
     try {
         if (isSupabaseEnabled && password) {
-            const { data: user } = await supabase
+            const { data: user, error: queryError } = await supabase
                 .from('app_users')
                 .select('password_hash, role, plan')
                 .eq('email', email.toLowerCase().trim())
                 .single();
+
+            if (queryError) {
+                console.error(`⚠️ Login Supabase query error for ${email}:`, queryError.message);
+                // If user simply not found, return 401; for other errors, return 500
+                if (queryError.code === 'PGRST116') {
+                    return res.status(401).json({ error: 'Email o contraseña incorrectos' });
+                }
+                return res.status(500).json({ error: 'Error de base de datos al verificar credenciales' });
+            }
 
             if (!user) return res.status(401).json({ error: 'Email o contraseña incorrectos' });
 
@@ -152,6 +159,10 @@ app.post('/api/auth/login', async (req, res) => {
             const { token, tenantId, role } = buildToken(email, user.role);
             return res.json({ token, tenantId, role });
         }
+
+        // Log why we reached mock auth
+        if (!isSupabaseEnabled) console.warn(`⚠️ Login mock fallback: Supabase disabled (email: ${email})`);
+        else if (!password) console.warn(`⚠️ Login mock fallback: no password provided (email: ${email})`);
 
         // Fallback: passwordless mock auth (blocked in production by default)
         const ALLOW_MOCK_AUTH = process.env.ALLOW_MOCK_AUTH === 'true';
