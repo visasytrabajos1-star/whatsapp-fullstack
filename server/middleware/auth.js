@@ -4,7 +4,7 @@ const { supabase, isSupabaseEnabled } = require('../services/supabaseClient');
 const getJwtSecret = () => {
     const secret = process.env.JWT_SECRET;
     if (!secret && process.env.NODE_ENV === 'production') {
-        console.error('⛔ JWT_SECRET is not set in production! Authentication will fail.');
+        throw new Error('⛔ JWT_SECRET is required in production. Set it in your Render Dashboard environment variables.');
     }
     return secret || 'alex-io-dev-secret-2026';
 };

@@ -238,6 +238,21 @@ hydrateSessionStatus().catch((error) => {
     console.warn('⚠️ Session hydration bootstrap error:', error.message);
 });
 
+const isOwnerTenant = (req, instanceId) => {
+    const tenantId = req.tenant?.id;
+    const info = sessionStatus.get(instanceId);
+    if (!tenantId || !info) return false;
+    return info.tenantId === tenantId;
+};
+
+const forbidIfNotOwner = (req, res, instanceId) => {
+    if (!isOwnerTenant(req, instanceId)) {
+        res.status(403).json({ error: 'Forbidden: instance does not belong to tenant' });
+        return true;
+    }
+    return false;
+};
+
 // --- HANDLER: QR MODE (Baileys) ---
 async function handleQRMessage(sock, msg, instanceId) {
     if (!msg.message || msg.key.fromMe) return;
@@ -726,7 +741,8 @@ router.post('/connect', async (req, res) => {
     }
 
     const instanceId = `alex_${Date.now()}`;
-    const tenantId = req.tenant?.id || 'unknown';
+    // Strictly use authenticated tenant ID for isolation
+    const effectiveTenantId = req.tenant?.id;
     const config = {
         companyName: cleanName,
         customPrompt,
@@ -737,7 +753,7 @@ router.post('/connect', async (req, res) => {
         copperApiKey: copperApiKey || '',
         copperUserEmail: copperUserEmail || '',
         provider,
-        tenantId,
+        tenantId: effectiveTenantId,
         ownerEmail: req.tenant?.email || '',
         metaApiUrl,
         metaPhoneNumberId,
@@ -796,7 +812,10 @@ router.post('/connect', async (req, res) => {
 
 router.post('/disconnect', async (req, res) => {
     const { instanceId } = req.body || {};
-    if (!instanceId || (!activeSessions.has(instanceId) && !clientConfigs.has(instanceId) && !sessionStatus.has(instanceId))) {
+    if (!instanceId) return res.status(400).json({ error: 'instanceId is required' });
+    if (forbidIfNotOwner(req, res, instanceId)) return;
+
+    if (!activeSessions.has(instanceId) && !clientConfigs.has(instanceId) && !sessionStatus.has(instanceId)) {
         return res.status(404).json({ error: 'Instance not found' });
     }
 
@@ -825,11 +844,13 @@ router.post('/disconnect', async (req, res) => {
 
 router.post('/config/:instanceId', async (req, res) => {
     const { instanceId } = req.params;
+    if (forbidIfNotOwner(req, res, instanceId)) return;
+
+    const config = req.body;
+    if (!config) return res.status(400).json({ error: 'Config is required' });
+
     const current = clientConfigs.get(instanceId);
-
     if (!current) return res.status(404).json({ error: 'Instance not found' });
-
-    // Ownership check
     if (req.tenant && req.tenant.role !== 'SUPERADMIN' && current.tenantId !== req.tenant.id) {
         return res.status(403).json({ error: 'No tienes permisos para modificar este bot.' });
     }
