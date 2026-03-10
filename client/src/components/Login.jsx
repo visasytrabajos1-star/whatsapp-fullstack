@@ -127,6 +127,8 @@ export default function Login() {
                 showMsg('Ya existe una cuenta con ese email. Usá "Iniciar Sesión".');
             } else if (msg.includes('Password should be')) {
                 showMsg('La contraseña debe tener al menos 6 caracteres.');
+            } else if (msg.includes('Failed to fetch')) {
+                showMsg('Email o contraseña incorrectos. Verifica tus datos de acceso.');
             } else {
                 showMsg(msg || 'Error al conectar con el servidor.');
             }
