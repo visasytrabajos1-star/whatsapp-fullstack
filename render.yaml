@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: whatsapp-fullstack
+    name: alex-io-v3-free
     env: node
     region: oregon
     plan: free
-    buildCommand: cd server && npm install && cd ../client && npm install && VITE_RENDER_BACKEND_URL=https://whatsapp-fullstack-gkm6.onrender.com VITE_API_URL=https://whatsapp-fullstack-gkm6.onrender.com npm run build && cd ../server
+    buildCommand: cd server && npm install && cd ../client && npm install && VITE_RENDER_BACKEND_URL=https://alex-io-v3-free.onrender.com VITE_API_URL=https://alex-io-v3-free.onrender.com npm run build && cd ../server
     startCommand: cd server && node index.js
     envVars:
       - key: NODE_ENV
@@ -31,7 +31,7 @@ services:
         value: alex_prod_safe_token_2026
 
   - type: static
-    name: whatsapp-fullstack-1
+    name: alex-io-v3-free-client
     env: static
     region: oregon
     rootDir: client
@@ -39,11 +39,11 @@ services:
     publishDir: build
     envVars:
       - key: VITE_API_URL
-        value: https://whatsapp-fullstack-gkm6.onrender.com
+        value: https://alex-io-v3-free.onrender.com
       - key: VITE_API_TIMEOUT_MS
         value: "20000"
       - key: VITE_RENDER_BACKEND_URL
-        value: https://whatsapp-fullstack-gkm6.onrender.com
+        value: https://alex-io-v3-free.onrender.com
       - key: VITE_SUPABASE_URL
         value: https://ygsmooajrqldzdtcukfd.supabase.co
       - key: VITE_SUPABASE_ANON_KEY

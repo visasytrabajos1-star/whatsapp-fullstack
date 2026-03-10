@@ -97,10 +97,10 @@ function SaasDashboard() {
     metaApiUrl: '',
     metaPhoneNumberId: '',
     metaAccessToken: '',
-    dialogApiKey: '',
     hubspotAccessToken: '',
     copperApiKey: '',
-    copperUserEmail: ''
+    copperUserEmail: '',
+    geminiApiKey: ''
   });
 
   useEffect(() => {
@@ -217,10 +217,10 @@ function SaasDashboard() {
       metaApiUrl: selected.metaApiUrl || '',
       metaPhoneNumberId: selected.metaPhoneNumberId || '',
       metaAccessToken: selected.metaAccessToken || '',
-      dialogApiKey: selected.dialogApiKey || '',
       hubspotAccessToken: selected.hubspotAccessToken || '',
       copperApiKey: selected.copperApiKey || '',
-      copperUserEmail: selected.copperUserEmail || ''
+      copperUserEmail: selected.copperUserEmail || '',
+      geminiApiKey: selected.geminiApiKey || ''
     });
   }, [selected]);
 
@@ -347,12 +347,12 @@ function SaasDashboard() {
         maxMessages: 10,
         super_prompt_json: null,
         metaApiUrl: '',
-        metaPhoneNumberId: '',
         metaAccessToken: '',
         dialogApiKey: '',
         hubspotAccessToken: '',
         copperApiKey: '',
-        copperUserEmail: ''
+        copperUserEmail: '',
+        geminiApiKey: ''
       };
 
       if (provider !== 'baileys') {
@@ -663,9 +663,14 @@ function SaasDashboard() {
 
                       <div>
                         <label className="block text-sm text-slate-400 mb-1">Canal WhatsApp (QR o Cloud)</label>
-                        <select className="w-full bg-slate-900 border border-slate-700 rounded p-2" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
+                        <select className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" value={configDraft.provider} onChange={(e) => setConfigDraft((prev) => ({ ...prev, provider: e.target.value }))}>
                           {PROVIDERS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
                         </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm text-slate-400 mb-1">Clave API de Gemini (Obligatorio)</label>
+                        <input className="w-full bg-slate-900 border border-slate-700 rounded p-2 text-white" type="password" placeholder="AIzaSy..." value={configDraft.geminiApiKey || ''} onChange={(e) => setConfigDraft((p) => ({ ...p, geminiApiKey: e.target.value }))} />
                       </div>
 
                       <div>

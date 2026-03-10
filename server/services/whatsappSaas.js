@@ -133,16 +133,19 @@ const getBotHealthScore = (instanceId) => {
 if (!fs.existsSync(sessionsDir)) fs.mkdirSync(sessionsDir, { recursive: true });
 
 const updateSessionStatus = async (instanceId, status, extra = {}) => {
+    const memoryConfig = clientConfigs.get(instanceId) || {};
+    const configValue = JSON.stringify(memoryConfig);
+
     const payload = {
         instance_id: instanceId,
-        session_id: instanceId, // SATISFIES NOT NULL CONSTRAINT
-        key_type: 'metadata',   // SATISFIES NOT NULL CONSTRAINT
-        key_id: 'status',       // SATISFIES NOT NULL CONSTRAINT
-        value: '{}',            // SATISFIES NOT NULL CONSTRAINT
+        session_id: instanceId,
+        key_type: 'metadata',
+        key_id: 'status',
+        value: configValue,
         status,
         qr_code: extra.qr_code ?? null,
-        company_name: extra.companyName ?? null,
-        provider: extra.provider ?? null,
+        company_name: extra.companyName ?? memoryConfig.companyName ?? null,
+        provider: extra.provider ?? memoryConfig.provider ?? null,
         updated_at: new Date().toISOString()
     };
 
@@ -157,7 +160,6 @@ const updateSessionStatus = async (instanceId, status, extra = {}) => {
     if (!isSupabaseEnabled) return;
 
     // Phase 3: Add explicit tenant info to sessions if available in memory
-    const memoryConfig = clientConfigs.get(instanceId);
     if (memoryConfig && memoryConfig.tenantId) {
         payload.tenant_id = memoryConfig.tenantId;
         payload.owner_email = memoryConfig.ownerEmail || null;
@@ -186,7 +188,7 @@ const hydrateSessionStatus = async () => {
 
         const { data, error } = await supabase
             .from(sessionsTable)
-            .select('instance_id,status,qr_code,updated_at,company_name,tenant_id,owner_email')
+            .select('instance_id,status,qr_code,updated_at,company_name,tenant_id,owner_email,value')
             .order('updated_at', { ascending: false })
             .limit(200);
 
@@ -205,13 +207,20 @@ const hydrateSessionStatus = async () => {
             });
 
             // Also hydrate clientConfigs so tenant filtering works in /status
+            let parsedValue = {};
+            try {
+                if (row.value && row.value !== '{}') parsedValue = JSON.parse(row.value);
+            } catch (e) { }
+
             if (row.tenant_id) {
                 clientConfigs.set(row.instance_id, {
                     ...(clientConfigs.get(row.instance_id) || {}),
+                    ...parsedValue,
                     tenantId: row.tenant_id,
                     ownerEmail: row.owner_email,
-                    companyName: row.company_name,
-                    provider: 'baileys'
+                    companyName: row.company_name || parsedValue.companyName,
+                    provider: parsedValue.provider || 'baileys',
+                    geminiApiKey: parsedValue.geminiApiKey || ''
                 });
             }
         }
@@ -392,7 +401,8 @@ async function handleQRMessage(sock, msg, instanceId) {
                 system_prompt: config.customPrompt || 'Eres ALEX IO, asistente virtual inteligente.',
                 voice: config.voice,
                 tenantId: config.tenantId,
-                instanceId: instanceId
+                instanceId: instanceId,
+                geminiApiKey: config.geminiApiKey
             },
             isAudio: isAudioMessage
         });
@@ -733,7 +743,7 @@ async function connectToWhatsApp(instanceId, config, res = null) {
 
 // --- ENDPOINTS ---
 router.post('/connect', async (req, res) => {
-    const { companyName, customPrompt, voice, maxWords, maxMessages, hubspotAccessToken, copperApiKey, copperUserEmail, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey } = req.body || {};
+    const { companyName, customPrompt, voice, maxWords, maxMessages, hubspotAccessToken, copperApiKey, copperUserEmail, provider = 'baileys', metaApiUrl, metaPhoneNumberId, metaAccessToken, dialogApiKey, geminiApiKey } = req.body || {};
     const cleanName = String(companyName || '').trim();
 
     if (!cleanName) {
@@ -758,7 +768,8 @@ router.post('/connect', async (req, res) => {
         metaApiUrl,
         metaPhoneNumberId,
         metaAccessToken,
-        dialogApiKey
+        dialogApiKey,
+        geminiApiKey: geminiApiKey || ''
     };
 
     try {
