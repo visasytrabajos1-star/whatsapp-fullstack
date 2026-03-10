@@ -1,6 +1,5 @@
 const normalize = (url) => (url || '').replace(/\/$/, '');
 
-const RENDER_BACKEND_HINT = import.meta.env.VITE_RENDER_BACKEND_URL || 'https://alex-io-server.onrender.com';
 const DEFAULT_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 45000);
 const FORCE_PRIMARY_BACKEND = import.meta.env.VITE_FORCE_PRIMARY_BACKEND === 'true';
 const ALLOW_ORIGIN_FALLBACK = import.meta.env.VITE_ALLOW_ORIGIN_FALLBACK !== 'false';
@@ -8,7 +7,10 @@ let lastResolvedApiBase = null;
 
 const getApiBases = () => {
   const envBase = normalize(import.meta.env.VITE_API_URL);
-  const primaryBase = envBase || RENDER_BACKEND_HINT;
+
+  // Use current origin if running in browser to avoid cross-origin / DNS issues
+  const browserOrigin = typeof window !== 'undefined' ? normalize(window.location.origin) : '';
+  const primaryBase = envBase || browserOrigin;
 
   if (FORCE_PRIMARY_BACKEND) return [primaryBase];
 
