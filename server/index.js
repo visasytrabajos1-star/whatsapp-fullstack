@@ -15,10 +15,10 @@ logger.info('✅ Express trust proxy enabled');
 const rateLimit = require('express-rate-limit');
 const { authenticateTenant } = require('./middleware/auth');
 
-// Rate Limiting Global (IP based)
+// Rate Limiting Global (IP based) — Relaxed for early deployment
 const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutos
-    limit: 100, // Máximo 100 peticiones por ventana
+    limit: 1000, // Amplio para fase de deployment
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     message: { error: 'Demasiadas peticiones. Por favor, intenta más tarde.', code: 'RATE_LIMIT_EXCEEDED' }
@@ -27,20 +27,15 @@ const globalLimiter = rateLimit({
 // Rate Limiting por Tenant (Solo para usuarios autenticados)
 const tenantLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hora
-    limit: (req) => {
-        const plan = req.tenant?.plan || 'FREE';
-        if (plan === 'ENTERPRISE') return 5000;
-        if (plan === 'PRO') return 1000;
-        return 100; // FREE/STARTER default
-    },
+    limit: 5000, // Amplio para fase de deployment
     keyGenerator: (req) => req.tenant?.id || req.ip,
     message: { error: 'Límite de cuota de API excedido para tu plan.', code: 'TENANT_QUOTA_EXCEEDED' }
 });
 
-// Rate Limiting para endpoints sensibles (Auth/Connect) - RELAXED FOR TESTING
+// Rate Limiting para endpoints sensibles (Auth/Connect)
 const sensitiveLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hora
-    limit: 100, // Máximo 100 intentos por hora (antes 10)
+    limit: 500, // Amplio para fase de deployment
     message: { error: 'Límite de intentos operativos excedido. Por favor, espera una hora.', code: 'SENSITIVE_LIMIT_EXCEEDED' }
 });
 
