@@ -45,19 +45,7 @@ const sensitiveLimiter = rateLimit({
 });
 
 app.use(globalLimiter);
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'"],
-            connectSrc: ["'self'", "https://*.supabase.co", "https://generativelanguage.googleapis.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:", "https:"],
-            frameSrc: ["'self'", "https://*.supabase.co"],
-        }
-    }
-}));
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // Middleware
 app.use(cors());
