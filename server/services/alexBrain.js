@@ -152,46 +152,47 @@ async function generateResponse({ message, history = [], botConfig = {}, isAudio
                 }
             }
         }
-
-        // 3. SAFEGUARD (If Gemini completely fails)
-        if (!responseText) {
-            responseText = '¡Hola! Soy ALEX. Estoy experimentando una alta demanda en mis sistemas de IA, pero no te preocupes, sigo aquí. ¿En qué puedo ayudarte mientras recupero mi conexión total?';
-            usedModel = 'safeguard';
-        }
-
-        const result = {
-            text: responseText,
-            trace: { model: usedModel, timestamp: new Date().toISOString() },
-            botPaused: false
-        };
-
-        // 4. VOZ
-        // (Disabled for Free V3 version because it removes premium features)
-        // result.audioBuffer = null;
-
-        global.responseCache.set(cacheKey, result);
-        return result;
     }
 
-    /**
-     * Función en segundo plano para analizar si la conversación actual forma a un prospecto (Lead)
-     * y extraer su temperatura y datos para el CRM.
-     */
-    async function extractLeadInfo({ history = [], systemPrompt, botConfig = {} }) {
-        const effectiveGeminiKey = botConfig.geminiApiKey || process.env.GEMINI_API_KEY;
-        if (!effectiveGeminiKey || history.length < 2) return null;
+    // 3. SAFEGUARD (If Gemini completely fails)
+    if (!responseText) {
+        responseText = '¡Hola! Soy ALEX. Estoy experimentando una alta demanda en mis sistemas de IA, pero no te preocupes, sigo aquí. ¿En qué puedo ayudarte mientras recupero mi conexión total?';
+        usedModel = 'safeguard';
+    }
 
-        try {
-            console.log(`🤖 [LeadExtractor] Analizando conversación de ${history.length} mensajes...`);
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+    const result = {
+        text: responseText,
+        trace: { model: usedModel, timestamp: new Date().toISOString() },
+        botPaused: false
+    };
 
-            const contents = [];
-            // Analizar últimos 8 mensajes para contexto
-            history.slice(-8).forEach(h => {
-                contents.push({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.content || h.text || "" }] });
-            });
+    // 4. VOZ
+    // (Disabled for Free V3 version because it removes premium features)
+    // result.audioBuffer = null;
 
-            const analysisPrompt = `
+    global.responseCache.set(cacheKey, result);
+    return result;
+}
+
+/**
+ * Función en segundo plano para analizar si la conversación actual forma a un prospecto (Lead)
+ * y extraer su temperatura y datos para el CRM.
+ */
+async function extractLeadInfo({ history = [], systemPrompt, botConfig = {} }) {
+    const effectiveGeminiKey = botConfig.geminiApiKey || process.env.GEMINI_API_KEY;
+    if (!effectiveGeminiKey || history.length < 2) return null;
+
+    try {
+        console.log(`🤖 [LeadExtractor] Analizando conversación de ${history.length} mensajes...`);
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+
+        const contents = [];
+        // Analizar últimos 8 mensajes para contexto
+        history.slice(-8).forEach(h => {
+            contents.push({ role: h.role === 'assistant' ? 'model' : 'user', parts: [{ text: h.content || h.text || "" }] });
+        });
+
+        const analysisPrompt = `
 Analiza la conversación anterior. 
 El System Prompt del Bot actuante era: "${systemPrompt || ''}"
 
@@ -204,81 +205,81 @@ Extrae la información del usuario en un objeto JSON estricto con esta estructur
     "summary": string (resumen de 1-2 líneas de lo que quiere el usuario o de la interacción)
 }
 `;
-            contents.push({ role: 'user', parts: [{ text: analysisPrompt }] });
+        contents.push({ role: 'user', parts: [{ text: analysisPrompt }] });
 
-            const payload = {
-                contents,
-                generationConfig: {
-                    temperature: 0.1,
-                    responseMimeType: "application/json"
-                }
-            };
-
-            const res = await axios.post(url, payload, { timeout: 8000 });
-            if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                let parsed = JSON.parse(res.data.candidates[0].content.parts[0].text);
-
-                // 5. LEAD SCHEMA GUARD (Disabled for V3 Free)
-                return parsed;
+        const payload = {
+            contents,
+            generationConfig: {
+                temperature: 0.1,
+                responseMimeType: "application/json"
             }
-        } catch (err) {
-            console.warn(`⚠️ [LeadExtractor] Falló la extracción:`, err.response?.data?.error?.message || err.message);
+        };
+
+        const res = await axios.post(url, payload, { timeout: 8000 });
+        if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            let parsed = JSON.parse(res.data.candidates[0].content.parts[0].text);
+
+            // 5. LEAD SCHEMA GUARD (Disabled for V3 Free)
+            return parsed;
         }
-        return null;
+    } catch (err) {
+        console.warn(`⚠️ [LeadExtractor] Falló la extracción:`, err.response?.data?.error?.message || err.message);
+    }
+    return null;
+}
+
+/**
+ * Traduce mensajes entrantes si no están en español.
+ * Fast path: Gemini Flash
+ */
+async function translateIncomingMessage(text, targetLang = 'es', botConfig = {}) {
+    const effectiveGeminiKey = botConfig.geminiApiKey || process.env.GEMINI_API_KEY;
+    if (!text || text.length < 2 || !effectiveGeminiKey) return { original: text, translated: null, model: null };
+
+    // Quick heuristic: if it contains typical Spanish words, ignore translation to save cost/latency
+    const lower = text.toLowerCase();
+    if (lower.match(/^(hola|gracias|precio|costo|info|buen|dia|tarde|noche|si|no)$/)) {
+        return { original: text, translated: null, model: 'skipped' };
     }
 
-    /**
-     * Traduce mensajes entrantes si no están en español.
-     * Fast path: Gemini Flash
-     */
-    async function translateIncomingMessage(text, targetLang = 'es', botConfig = {}) {
-        const effectiveGeminiKey = botConfig.geminiApiKey || process.env.GEMINI_API_KEY;
-        if (!text || text.length < 2 || !effectiveGeminiKey) return { original: text, translated: null, model: null };
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${effectiveGeminiKey}`;
+        const prompt = `Analiza el texto. Si ya está en idioma ISO '${targetLang}', devuelve exacto el mismo texto. Si está en OTRO idioma, tradúcelo de forma natural a '${targetLang}'. Devuelve SOLO la traducción o el texto original, sin explicaciones, comillas ni prefijos. Texto: "${text}"`;
 
-        // Quick heuristic: if it contains typical Spanish words, ignore translation to save cost/latency
-        const lower = text.toLowerCase();
-        if (lower.match(/^(hola|gracias|precio|costo|info|buen|dia|tarde|noche|si|no)$/)) {
-            return { original: text, translated: null, model: 'skipped' };
-        }
+        const payload = {
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 800 }
+        };
 
-        try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${effectiveGeminiKey}`;
-            const prompt = `Analiza el texto. Si ya está en idioma ISO '${targetLang}', devuelve exacto el mismo texto. Si está en OTRO idioma, tradúcelo de forma natural a '${targetLang}'. Devuelve SOLO la traducción o el texto original, sin explicaciones, comillas ni prefijos. Texto: "${text}"`;
+        const res = await axios.post(url, payload, { timeout: 3500 });
+        if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
+            let translated = res.data.candidates[0].content.parts[0].text.trim();
+            // Clean up possible weird outputs
+            translated = translated.replace(/^['"](.*)['"]$/, '$1').trim();
 
-            const payload = {
-                contents: [{ role: 'user', parts: [{ text: prompt }] }],
-                generationConfig: { temperature: 0.1, maxOutputTokens: 800 }
-            };
-
-            const res = await axios.post(url, payload, { timeout: 3500 });
-            if (res.data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                let translated = res.data.candidates[0].content.parts[0].text.trim();
-                // Clean up possible weird outputs
-                translated = translated.replace(/^['"](.*)['"]$/, '$1').trim();
-
-                if (translated.toLowerCase() === text.toLowerCase()) {
-                    return { original: text, translated: null, model: 'gemini-flash' };
-                }
-                return { original: text, translated, model: 'gemini-flash' };
+            if (translated.toLowerCase() === text.toLowerCase()) {
+                return { original: text, translated: null, model: 'gemini-flash' };
             }
-        } catch (err) {
-            console.warn(`⚠️ [Translator] Falló traducción de entrada:`, err.message);
+            return { original: text, translated, model: 'gemini-flash' };
         }
-        return { original: text, translated: null, model: 'error' };
+    } catch (err) {
+        console.warn(`⚠️ [Translator] Falló traducción de entrada:`, err.message);
     }
+    return { original: text, translated: null, model: 'error' };
+}
 
-    /**
-     * STT Transcription (Disabled for Free V3)
-     */
-    async function transcribeAudio(audioBuffer) {
-        return { text: "El plan gratuito no incluye transcripción de notas de voz. Por favor responde mediante texto libre." };
-    }
+/**
+ * STT Transcription (Disabled for Free V3)
+ */
+async function transcribeAudio(audioBuffer) {
+    return { text: "El plan gratuito no incluye transcripción de notas de voz. Por favor responde mediante texto libre." };
+}
 
-    // --- SHADOW COMPLIANCE AUDITOR (Disabled for V3) ---
-    async function runComplianceAudit({ messageContent, aiResponse, systemPrompt, tenantId, instanceId, messageId, supabase }) {
-        // Free tier does not use Anthropic risk auditing.
-        return;
-    }
+// --- SHADOW COMPLIANCE AUDITOR (Disabled for V3) ---
+async function runComplianceAudit({ messageContent, aiResponse, systemPrompt, tenantId, instanceId, messageId, supabase }) {
+    // Free tier does not use Anthropic risk auditing.
+    return;
+}
 
-    module.exports = { generateResponse, extractLeadInfo, transcribeAudio, translateIncomingMessage, runComplianceAudit };
+module.exports = { generateResponse, extractLeadInfo, transcribeAudio, translateIncomingMessage, runComplianceAudit };
 
