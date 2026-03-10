@@ -30,7 +30,7 @@ services:
       - key: WHATSAPP_WEBHOOK_VERIFY_TOKEN
         value: alex_prod_safe_token_2026
 
-  - type: static
+  - type: static_site
     name: alex-io-v3-free-client
     env: static
     region: oregon
