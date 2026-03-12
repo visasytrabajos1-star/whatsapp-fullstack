@@ -20,6 +20,8 @@ const makeTokens = (theme) => ({
     textDim: theme?.textMuted || '#64748b',
 });
 
+const C = makeTokens(); // Global fallback tokens
+
 // ─── Business Type Cards ───────────────────────────────────────
 const BUSINESS_TYPES = [
     { id: 'sales', icon: '🎯', title: 'Ventas Online', desc: 'E-commerce, catálogos, cierre de ventas', color: C.indigo, prompt: 'Eres un VENDEDOR EXPERTO altamente persuasivo para {businessName}. Tu meta es calificar al usuario, resolver objeciones y cerrar ventas. Sé dinámico, ofrece productos relevantes y guía al usuario hacia la compra.' },
