@@ -1130,6 +1130,41 @@ router.post('/knowledge/:instanceId/upload', upload.single('file'), async (req, 
     }
 });
 
+// --- MEDIA UPLOAD FOR BROADCAST ---
+router.post('/upload-media', upload.single('file'), async (req, res) => {
+    try {
+        const tenantId = req.tenant?.id;
+        if (!tenantId) return res.status(403).json({ error: 'Autorización requerida' });
+        if (!req.file) return res.status(400).json({ error: 'No se envió un archivo' });
+
+        const file = req.file;
+        const fileExt = file.originalname.split('.').pop();
+        const fileName = `${tenantId}_${Date.now()}.${fileExt}`;
+        const filePath = `broadcast/${fileName}`;
+
+        // Ensure 'media' bucket exists (fire-and-forget, non-blocking check)
+        supabase.storage.createBucket('media', { public: true }).catch(() => { });
+
+        const { data, error } = await supabase.storage
+            .from('media')
+            .upload(filePath, file.buffer, {
+                contentType: file.mimetype,
+                upsert: true
+            });
+
+        if (error) throw error;
+
+        const { data: { publicUrl } } = supabase.storage
+            .from('media')
+            .getPublicUrl(filePath);
+
+        res.json({ success: true, url: publicUrl });
+    } catch (err) {
+        console.error('❌ Error uploading to Supabase Storage:', err.message);
+        res.status(500).json({ error: 'Error al subir archivo a la nube.' });
+    }
+});
+
 router.delete('/knowledge/:instanceId/:documentName', async (req, res) => {
     const { instanceId, documentName } = req.params;
     const tenantId = req.tenant?.id;

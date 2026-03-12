@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-import { Send, Users, AlertTriangle, Loader, CheckCircle2 } from 'lucide-react';
+import { Send, Users, AlertTriangle, Loader, CheckCircle2, UploadCloud, Paperclip } from 'lucide-react';
 import { fetchJsonWithApiFallback, getAuthHeaders } from '../api';
 
 export default function BroadcastCampaign({ instanceId, instanceName }) {
@@ -8,8 +7,45 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
     const [mediaUrl, setMediaUrl] = useState('');
     const [mediaType, setMediaType] = useState('image'); // image, video, audio, document
     const [loading, setLoading] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [result, setResult] = useState(null);
     const [confirmModal, setConfirmModal] = useState(null);
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            const res = await fetch('/api/saas/upload-media', {
+                method: 'POST',
+                headers: {
+                    ...getAuthHeaders()
+                },
+                body: formData
+            });
+
+            const data = await res.json();
+            if (data.success && data.url) {
+                setMediaUrl(data.url);
+                // Auto detect type
+                if (file.type.startsWith('image/')) setMediaType('image');
+                else if (file.type.startsWith('video/')) setMediaType('video');
+                else if (file.type.startsWith('audio/')) setMediaType('audio');
+                else if (file.type === 'application/pdf') setMediaType('document');
+            } else {
+                alert(data.error || 'Error subiendo archivo');
+            }
+        } catch (err) {
+            console.error('Upload error:', err);
+            alert('Error de conexión al subir el archivo');
+        } finally {
+            setUploading(false);
+        }
+    };
 
     const handleSend = () => {
         if (!phonesText.trim() || !message.trim()) return;
@@ -109,9 +145,9 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
                         <div className="flex gap-2">
                             <AlertTriangle size={16} className="text-orange-400 shrink-0 mt-0.5" />
                             <div>
-                                <h4 className="text-xs font-bold text-orange-400">Riesgo de Ban / Rate Limits</h4>
+                                <h4 className="text-xs font-bold text-orange-400">Riesgo de Ban</h4>
                                 <p className="text-[10px] text-orange-200 mt-1">
-                                    El sistema inserta un delay activo de 40 segundos entre cada mensaje para evitar baneos. Aún así, un uso abusivo puede bloquear tu número si usas WhatsApp Web/Baileys. Si usas Cloud API, asegúrate de tener una plantilla (Template) aprobada si pasaron 24hs desde la última interacción.
+                                    Delay de 40s activo. En Cloud API usa Templates aprobados. Evita el spam para no ser bloqueado.
                                 </p>
                             </div>
                         </div>
@@ -128,7 +164,14 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
                             onChange={e => setMessage(e.target.value)}
                         />
 
-                        <label className="block text-xs font-bold text-slate-300 mb-1">Adjuntar Multimedia (Opcional)</label>
+                        <label className="block text-xs font-bold text-slate-300 mb-1 flex items-center justify-between">
+                            <span>Adjuntar Multimedia (Opcional)</span>
+                            <label className="text-fuchsia-400 hover:text-fuchsia-300 cursor-pointer flex items-center gap-1 text-[10px] uppercase tracking-wider">
+                                {uploading ? <Loader size={10} className="animate-spin" /> : <Paperclip size={10} />}
+                                {uploading ? 'Subiendo...' : 'Examinar'}
+                                <input type="file" className="hidden" onChange={handleFileUpload} disabled={uploading} />
+                            </label>
+                        </label>
                         <div className="flex gap-2 mb-1">
                             <select
                                 className="bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-fuchsia-500 w-1/3"
@@ -140,15 +183,25 @@ export default function BroadcastCampaign({ instanceId, instanceName }) {
                                 <option value="audio">Audio (Nota de voz)</option>
                                 <option value="document">Documento (PDF)</option>
                             </select>
-                            <input
-                                type="url"
-                                className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-fuchsia-500"
-                                placeholder="URL pública de la imagen/video/audio (Ej: https://...)"
-                                value={mediaUrl}
-                                onChange={e => setMediaUrl(e.target.value)}
-                            />
+                            <div className="flex-1 relative">
+                                <input
+                                    type="url"
+                                    className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-fuchsia-500"
+                                    placeholder="URL o archivo subido..."
+                                    value={mediaUrl}
+                                    onChange={e => setMediaUrl(e.target.value)}
+                                />
+                                {mediaUrl && (
+                                    <button
+                                        onClick={() => setMediaUrl('')}
+                                        className="absolute right-3 top-3 text-slate-500 hover:text-slate-300"
+                                    >
+                                        ✕
+                                    </button>
+                                )}
+                            </div>
                         </div>
-                        <p className="text-[10px] text-slate-500">Debe ser un enlace directo público (terminado en .jpg, .mp4, .pdf, etc.). Enlaces web comunes pueden ir en el texto.</p>
+                        <p className="text-[10px] text-slate-500">Usa "Examinar" para subir un archivo o pega una URL pública directa.</p>
                     </div>
 
                     <button
